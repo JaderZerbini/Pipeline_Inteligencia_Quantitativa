@@ -1,0 +1,12 @@
+yfinance
+pandas
+pandas_ta
+feedparser
+python-dotenv
+streamlit
+streamlit-autorefresh
+matplotlib
+python-telegram-bot
+google-genai
+openai
+requests

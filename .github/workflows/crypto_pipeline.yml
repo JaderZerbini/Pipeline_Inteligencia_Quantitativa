@@ -1,0 +1,73 @@
+# .github/workflows/crypto_pipeline.yml
+#
+# Roda o pipeline cripto automaticamente 2x por dia via GitHub Actions.
+# Não requer servidor próprio — tudo acontece nos servidores do GitHub (gratuito).
+#
+# Horários (UTC):
+#   - 09:00 UTC = 06:00 BRT (antes da abertura do mercado tradicional)
+#   - 21:00 UTC = 18:00 BRT (após fechamento da B3 — momento de revisar cripto)
+#
+# Configuração necessária:
+#   Vá em Settings → Secrets and variables → Actions → New repository secret
+#   e adicione os segredos listados em "env" abaixo.
+
+name: Pipeline Cripto
+
+on:
+  schedule:
+    - cron: "0 9 * * *"   # 06:00 BRT — manhã
+    - cron: "0 21 * * *"  # 18:00 BRT — fim do pregão B3
+  workflow_dispatch:       # Permite rodar manualmente pelo botão "Run workflow"
+
+jobs:
+  run_crypto_pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10   # Segurança: cancela se travar
+
+    steps:
+      # 1. Baixar o código do repositório
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      # 2. Configurar Python
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # 3. Instalar dependências
+      - name: Instalar dependências
+        run: |
+          pip install --upgrade pip
+          pip install \
+            requests \
+            python-dotenv \
+            python-telegram-bot \
+            openai  # OpenRouter usa API compatível com OpenAI
+
+      # 4. Criar pasta de dados (o banco SQLite fica aqui)
+      - name: Criar pasta data/
+        run: mkdir -p data
+
+      # 5. Executar o pipeline
+      - name: Executar pipeline cripto
+        env:
+          # Chaves de API — configure em Settings → Secrets
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LUNARCRUSH_API_KEY: ${{ secrets.LUNARCRUSH_API_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Binance não precisa de chave para dados públicos (preço, RSI)
+        run: |
+          python crypto_main.py
+
+      # 6. Salvar log como artefato (visível na aba Actions por 7 dias)
+      - name: Salvar log
+        if: always()   # Salva mesmo se o pipeline falhar
+        uses: actions/upload-artifact@v4
+        with:
+          name: crypto-log-${{ github.run_number }}
+          path: data/crypto_pipeline.log
+          retention-days: 7
