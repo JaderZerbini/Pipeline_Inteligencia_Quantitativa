@@ -22,7 +22,9 @@ on:
 jobs:
   run_crypto_pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 10   # Segurança: cancela se travar
+    timeout-minutes: 10
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       # 1. Baixar o código do repositório
@@ -40,11 +42,7 @@ jobs:
       - name: Instalar dependências
         run: |
           pip install --upgrade pip
-          pip install \
-            requests \
-            python-dotenv \
-            python-telegram-bot \
-            openai  # OpenRouter usa API compatível com OpenAI
+          pip install -r requirements.txt
 
       # 4. Criar pasta de dados (o banco SQLite fica aqui)
       - name: Criar pasta data/
