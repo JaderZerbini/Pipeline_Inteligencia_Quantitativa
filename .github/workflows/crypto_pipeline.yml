@@ -32,11 +32,11 @@ jobs:
         uses: actions/checkout@v4
 
       # 2. Configurar Python
-      - name: Configurar Python 3.11
+      - name: Configurar Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
+          python-version: "3.12"
+          cache: ""
 
       # 3. Instalar dependências
       - name: Instalar dependências
