@@ -1,11 +1,11 @@
 """
 crypto_scanner.py
 -----------------
-Coleta dados de preço (Binance API) e sentimento social (LunarCrush)
+Coleta dados de preço (Binance API) e sentimento social (CoinGecko)
 para os pares cripto configurados. Retorna sinais estruturados prontos
 para o crypto_decision.py consumir.
 
-Não requer dependências pagas — usa tiers gratuitos de ambas as APIs.
+Não requer chaves de API — ambas as APIs são públicas e gratuitas.
 """
 
 import os
@@ -32,8 +32,7 @@ CRYPTO_PAIRS = [
     "SOLUSDT",
 ]
 
-# LunarCrush: mapeamento símbolo → coin (para busca via API)
-LUNARCRUSH_MAP = {
+COINGECKO_MAP = {
     "BTCUSDT": "bitcoin",
     "ETHUSDT": "ethereum",
     "BNBUSDT": "binancecoin",
@@ -41,7 +40,7 @@ LUNARCRUSH_MAP = {
 }
 
 BINANCE_BASE = "https://api.binance.com/api/v3"
-LUNARCRUSH_BASE = "https://lunarcrush.com/api4/public"
+COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
 
 # ---------------------------------------------------------------------------
@@ -105,34 +104,59 @@ def get_binance_rsi(symbol: str, interval: str = "1h", periods: int = 14) -> flo
 
 
 # ---------------------------------------------------------------------------
-# LunarCrush — sentimento social (tier gratuito: 2.000 créditos/dia)
+# CoinGecko — dados de mercado e proxy de sentimento (API pública gratuita)
 # ---------------------------------------------------------------------------
 
-def get_lunarcrush_sentiment(coin: str) -> dict | None:
+def get_coingecko_data(coin_id: str) -> dict | None:
     """
-    Retorna score de sentimento social do LunarCrush para a moeda.
-    Usa o endpoint /coins/:coin/v1 que consome 1 crédito por chamada.
+    Fetches market data from CoinGecko free API (no key required).
+    Returns sentiment proxy built from price change metrics.
 
-    Retorna um dicionário com galaxy_score (0-100), alt_rank,
-    social_volume_24h e sentiment (positive/negative/neutral).
+    Endpoint: /api/v3/coins/{id}
+    Free tier: 10-30 calls/minute — sufficient for 4 coins 2x/day.
     """
-    api_key = os.getenv("LUNARCRUSH_API_KEY", "")
-    if not api_key:
-        logger.warning("[LUNARCRUSH] LUNARCRUSH_API_KEY não configurada — pulando sentimento social")
-        return None
-
     try:
-        url = f"{LUNARCRUSH_BASE}/coins/{coin}/v1"
-        headers = {"Authorization": f"Bearer {api_key}"}
-        resp = _session.get(url, headers=headers, timeout=10)
+        url = f"{COINGECKO_BASE}/coins/{coin_id}"
+        params = {
+            "localization": "false",
+            "tickers": "false",
+            "market_data": "true",
+            "community_data": "true",
+            "developer_data": "false",
+        }
+        resp = _session.get(url, params=params, timeout=15)
         resp.raise_for_status()
-        data = resp.json().get("data", {})
+        data = resp.json()
 
-        galaxy_score = data.get("galaxy_score", 0)
-        alt_rank = data.get("alt_rank", 9999)
-        social_volume = data.get("social_volume_24h", 0)
+        market = data.get("market_data", {})
+        community = data.get("community_data", {})
 
-        # Sentiment: galaxy_score > 60 = positivo, < 40 = negativo
+        # Price change metrics as sentiment proxy
+        change_1h  = market.get("price_change_percentage_1h_in_currency",  {}).get("usd", 0) or 0
+        change_24h = market.get("price_change_percentage_24h", 0) or 0
+        change_7d  = market.get("price_change_percentage_7d", 0) or 0
+
+        # Community size as social volume proxy
+        twitter_followers  = community.get("twitter_followers", 0) or 0
+        reddit_subscribers = community.get("reddit_subscribers", 0) or 0
+        social_volume = twitter_followers + reddit_subscribers
+
+        # Build galaxy_score proxy (0-100) from price momentum
+        raw_score = 50  # neutral baseline
+        if change_1h  > 0: raw_score += 5
+        if change_1h  < 0: raw_score -= 5
+        if change_24h > 2: raw_score += 10
+        if change_24h < -2: raw_score -= 10
+        if change_7d  > 5: raw_score += 15
+        if change_7d  < -5: raw_score -= 15
+
+        # Market cap rank as quality filter (lower rank = better)
+        market_cap_rank = data.get("market_cap_rank", 999) or 999
+        if market_cap_rank <= 10: raw_score += 10
+        elif market_cap_rank <= 50: raw_score += 5
+
+        galaxy_score = max(0, min(100, raw_score))
+
         if galaxy_score >= 60:
             sentiment = "positive"
         elif galaxy_score <= 40:
@@ -142,13 +166,15 @@ def get_lunarcrush_sentiment(coin: str) -> dict | None:
 
         return {
             "galaxy_score": galaxy_score,
-            "alt_rank": alt_rank,
+            "alt_rank": market_cap_rank,
             "social_volume_24h": social_volume,
             "sentiment": sentiment,
+            "change_1h": change_1h,
+            "change_7d": change_7d,
         }
 
     except Exception as e:
-        logger.warning(f"[LUNARCRUSH] {coin}: {e}")
+        logger.warning(f"[COINGECKO] {coin_id}: {e}")
         return None
 
 
@@ -163,7 +189,7 @@ def scan_crypto() -> list[dict]:
     Cada sinal contém:
       - symbol, price, change_pct_24h, volume_usdt_24h
       - rsi_1h
-      - galaxy_score, sentiment (LunarCrush, se disponível)
+      - galaxy_score, sentiment (CoinGecko, se disponível)
       - scan_ts (ISO UTC)
     """
     signals = []
@@ -178,8 +204,8 @@ def scan_crypto() -> list[dict]:
 
         rsi = get_binance_rsi(symbol)
 
-        coin_name = LUNARCRUSH_MAP.get(symbol)
-        social = get_lunarcrush_sentiment(coin_name) if coin_name else None
+        coin_id = COINGECKO_MAP.get(symbol)
+        social = get_coingecko_data(coin_id) if coin_id else None
 
         signal = {
             "symbol": symbol,
@@ -201,8 +227,8 @@ def scan_crypto() -> list[dict]:
 
         signals.append(signal)
 
-        # Pausa entre requisições para não estourar rate limit
-        time.sleep(0.5)
+        # Pausa entre requisições para respeitar rate limit do CoinGecko
+        time.sleep(1.5)
 
     return signals
 

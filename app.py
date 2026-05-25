@@ -112,7 +112,7 @@ tab_scanner, tab_sinais, tab_ops, tab_bt, tab_validation, tab_cripto = st.tabs(
 # never independently computed. FIX 3: auto-refresh every 60 s.
 
 with tab_scanner:
-    st_autorefresh(interval=60_000, key="scanner_refresh")
+    st_autorefresh(interval=300_000, key="scanner_refresh")
 
     with st.expander("📘 Como ler este painel:", expanded=False):
         st.markdown("""
@@ -220,7 +220,7 @@ with tab_scanner:
 
 with tab_sinais:
     # FIX 3: auto-refresh every 2 min
-    st_autorefresh(interval=120_000, key="sinais_refresh")
+    st_autorefresh(interval=300_000, key="sinais_refresh")
 
     st.subheader("Histórico de Sinais — últimos 30 dias")
     data = _cached_signals(30)
@@ -591,7 +591,7 @@ with tab_cripto:
     c1.metric("Última execução", last_run_str)
     c2.metric("Sinais hoje", today_count)
     c3.metric("Acionáveis (7d)", actionable_7d)
-    c4.metric("Status API", "🟡 LunarCrush: plano pago")
+    c4.metric("Status API", "🟢 CoinGecko: gratuito")
 
     st.markdown("---")
 

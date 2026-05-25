@@ -63,6 +63,7 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # Binance não precisa de chave para dados públicos (preço, RSI)
+          # CoinGecko também não precisa de chave (API pública gratuita)
         run: |
           python crypto_main.py
 
