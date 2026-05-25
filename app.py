@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import sys
 import pandas as pd
 import streamlit as st
 import yfinance as yf
@@ -482,61 +483,178 @@ with tab_validation:
 # ── Tab 6: Cripto ─────────────────────────────────────────────────────────
 
 with tab_cripto:
-    st.subheader("Pipeline Cripto — Sinais Recentes")
+    import subprocess
+    import re
+    from datetime import timedelta
 
-    @st.cache_data(ttl=300)
-    def load_crypto_signals():
-        import pandas as pd
+    # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _to_brt(utc_str: str) -> str:
+        """Convert ISO UTC string to BRT (UTC-3) formatted as 'DD/MM HH:MM'."""
+        try:
+            dt = datetime.fromisoformat(str(utc_str))
+            return (dt - timedelta(hours=3)).strftime("%d/%m %H:%M")
+        except Exception:
+            return str(utc_str)[:16] if utc_str else "—"
+
+    @st.cache_data(ttl=60)
+    def _load_crypto_stats():
+        try:
+            with get_connection() as conn:
+                row = conn.execute("SELECT MAX(created_at) FROM crypto_signals").fetchone()
+                last_raw = row[0] if row and row[0] else None
+                today_str = datetime.utcnow().date().isoformat()
+                today_count = conn.execute(
+                    "SELECT COUNT(*) FROM crypto_signals WHERE DATE(created_at) = ?",
+                    (today_str,),
+                ).fetchone()[0]
+                week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+                actionable = conn.execute(
+                    "SELECT COUNT(*) FROM crypto_signals "
+                    "WHERE decision IN ('FORTE','MODERADO') AND created_at >= ?",
+                    (week_ago,),
+                ).fetchone()[0]
+                return last_raw, int(today_count), int(actionable)
+        except Exception:
+            return None, 0, 0
+
+    @st.cache_data(ttl=60)
+    def _load_crypto_signals_tab():
         try:
             with get_connection() as conn:
                 return pd.read_sql(
-                    """SELECT symbol, decision, ai_score, ai_veredicto,
-                              price, rsi_1h, galaxy_score,
-                              change_pct_24h, sentiment, created_at
+                    """SELECT symbol, decision, ai_score, price,
+                              rsi_1h, galaxy_score, sentiment, created_at
                        FROM crypto_signals
                        ORDER BY created_at DESC
-                       LIMIT 50""",
-                    conn
+                       LIMIT 100""",
+                    conn,
                 )
         except Exception:
             return pd.DataFrame()
 
-    df_crypto = load_crypto_signals()
+    def _parse_run_table(output: str) -> pd.DataFrame:
+        """Parse pipeline stdout report lines into a summary DataFrame."""
+        pat = re.compile(
+            r"^\s{2,}(\w+)\s+\$\s*([\d,\.]+)\s*\|\s*RSI=([\d\.]+|N/A)\s*"
+            r"\|\s*galaxy=(\S+)\s*\|\s*(\w+)"
+        )
+        rows = []
+        for line in output.splitlines():
+            m = pat.match(line)
+            if m:
+                sym, price_s, rsi_s, galaxy_s, decision = m.groups()
+                try:
+                    price = float(price_s.replace(",", ""))
+                except (ValueError, TypeError):
+                    price = None
+                try:
+                    rsi = float(rsi_s)
+                except (ValueError, TypeError):
+                    rsi = None
+                galaxy = "—" if galaxy_s in ("None", "N/A") else galaxy_s
+                rows.append({"Par": sym, "Preço (USD)": price,
+                             "RSI (1h)": rsi, "Galaxy": galaxy, "Decisão": decision})
+        return pd.DataFrame(rows)
+
+    def _color_decision(series: pd.Series) -> list[str]:
+        c = {"FORTE": "color: #4caf50", "MODERADO": "color: #ffc107",
+             "BLOQUEADO": "color: #f44336", "AGUARDAR": "color: #888888"}
+        return [c.get(v, "") for v in series]
+
+    def _run_and_show(cmd_args: list, clear_after: bool = False) -> None:
+        with st.spinner("Executando pipeline cripto..."):
+            proc = subprocess.run(cmd_args, capture_output=True, text=True, timeout=120)
+        raw = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+        if not raw.strip():
+            raw = "(sem saída)"
+        df_run = _parse_run_table(raw)
+        if not df_run.empty:
+            st.dataframe(
+                df_run.style.apply(_color_decision, subset=["Decisão"]),
+                use_container_width=True,
+            )
+        with st.expander("📋 Log completo", expanded=False):
+            st.code(raw, language=None)
+        if clear_after:
+            _load_crypto_stats.clear()
+            _load_crypto_signals_tab.clear()
+
+    # ── Section 1: Status bar ─────────────────────────────────────────────────
+
+    st.subheader("🪙 Pipeline Cripto")
+
+    last_raw, today_count, actionable_7d = _load_crypto_stats()
+    last_run_str = _to_brt(last_raw) if last_raw else "Nunca"
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Última execução", last_run_str)
+    c2.metric("Sinais hoje", today_count)
+    c3.metric("Acionáveis (7d)", actionable_7d)
+    c4.metric("Status API", "🟡 LunarCrush: plano pago")
+
+    st.markdown("---")
+
+    # ── Section 2: Run buttons ────────────────────────────────────────────────
+
+    btn_col1, btn_col2 = st.columns(2)
+    with btn_col1:
+        if st.button("▶ Rodar agora", key="cripto_prod"):
+            _run_and_show([sys.executable, "crypto_main.py"], clear_after=True)
+    with btn_col2:
+        if st.button("🧪 Dry-run", key="cripto_dry"):
+            _run_and_show([sys.executable, "crypto_main.py", "--dry-run"])
+
+    st.markdown("---")
+
+    # ── Section 3: Signals table ──────────────────────────────────────────────
+
+    st.subheader("Sinais recentes")
+    df_crypto = _load_crypto_signals_tab()
 
     if df_crypto.empty:
-        st.info("Nenhum sinal cripto ainda. Execute: python crypto_main.py")
+        st.info("Nenhum sinal ainda. Clique em '▶ Rodar agora' para executar o pipeline.")
     else:
-        def _color_decision(val):
-            colors = {
-                "FORTE":     "background-color: #1a4a1a; color: #4caf50",
-                "MODERADO":  "background-color: #4a3a00; color: #ffc107",
-                "BLOQUEADO": "background-color: #4a1a1a; color: #f44336",
-                "AGUARDAR":  "",
-            }
-            return colors.get(val, "")
-
-        styled = df_crypto.style.map(
-            _color_decision, subset=["decision"]
+        disp = df_crypto.copy()
+        disp["created_at"] = disp["created_at"].apply(_to_brt)
+        disp["price"] = disp["price"].apply(
+            lambda x: f"{float(x):.2f}" if pd.notna(x) else "—"
         )
-        st.dataframe(styled, use_container_width=True)
+        disp["rsi_1h"] = disp["rsi_1h"].apply(
+            lambda x: f"{float(x):.1f}" if pd.notna(x) else "—"
+        )
+        disp["galaxy_score"] = disp["galaxy_score"].apply(
+            lambda x: str(int(float(x))) if pd.notna(x) else "—"
+        )
+        disp = disp.rename(columns={
+            "symbol":       "Par",
+            "decision":     "Decisão",
+            "ai_score":     "Score IA",
+            "price":        "Preço (USD)",
+            "rsi_1h":       "RSI (1h)",
+            "galaxy_score": "Galaxy",
+            "sentiment":    "Sentimento",
+            "created_at":   "Data/Hora",
+        })
+        st.dataframe(disp.style.apply(_color_decision, subset=["Decisão"]),
+                     use_container_width=True)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Rodar pipeline cripto agora"):
-            import subprocess
-            with st.spinner("Executando crypto_main.py..."):
-                result = subprocess.run(
-                    ["python", "crypto_main.py"],
-                    capture_output=True, text=True, timeout=120
-                )
-            st.code(result.stdout or result.stderr)
-            st.cache_data.clear()
-    with col2:
-        if st.button("Dry-run (sem Telegram)"):
-            import subprocess
-            with st.spinner("Executando dry-run..."):
-                result = subprocess.run(
-                    ["python", "crypto_main.py", "--dry-run"],
-                    capture_output=True, text=True, timeout=120
-                )
-            st.code(result.stdout or result.stderr)
+    if st.button("🔄 Atualizar", key="cripto_refresh"):
+        _load_crypto_stats.clear()
+        _load_crypto_signals_tab.clear()
+        st.rerun()
+
+    # ── Section 4: Mini chart ─────────────────────────────────────────────────
+
+    if not df_crypto.empty and len(df_crypto) >= 5:
+        st.subheader("Score IA por execução (últimas 50)")
+        try:
+            df_chart = df_crypto.head(50).copy()
+            df_chart["_brt"] = df_chart["created_at"].apply(_to_brt)
+            df_chart = df_chart.iloc[::-1]  # chronological order
+            df_pivot = df_chart.pivot_table(
+                index="_brt", columns="symbol", values="ai_score", aggfunc="mean"
+            )
+            st.line_chart(df_pivot)
+        except Exception:
+            pass
