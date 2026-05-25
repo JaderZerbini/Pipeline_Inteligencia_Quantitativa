@@ -38,6 +38,9 @@ jobs:
           python-version: "3.12"
           cache: ""
 
+      - name: Verificar versão do Python
+        run: python --version
+
       # 3. Instalar dependências
       - name: Instalar dependências
         run: |
