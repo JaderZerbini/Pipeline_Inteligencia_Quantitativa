@@ -18,6 +18,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Force UTF-8 output on Windows (cp1252 can't encode box-drawing chars)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from dotenv import load_dotenv
 
 load_dotenv()

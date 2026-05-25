@@ -1,0 +1,8 @@
+# requirements-actions.txt — deps for GitHub Actions (Linux / Python 3.12)
+# Only the packages actually imported by the crypto pipeline.
+# Do NOT add pandas-ta, python-certifi-win32, streamlit, or B3-only packages here.
+requests>=2.28.0
+python-dotenv>=1.0.0
+python-telegram-bot>=20.0
+google-genai>=1.0.0
+openai>=1.0.0
