@@ -124,9 +124,25 @@ def get_coingecko_data(coin_id: str) -> dict | None:
             "community_data": "true",
             "developer_data": "false",
         }
-        resp = _session.get(url, params=params, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
+        data = None
+        for attempt in range(3):
+            try:
+                resp = _session.get(url, params=params, timeout=15)
+                if resp.status_code == 429:
+                    wait = 10 * (attempt + 1)
+                    logger.warning(f"[COINGECKO] {coin_id}: rate limit (429) — aguardando {wait}s (tentativa {attempt+1}/3)")
+                    time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                break
+            except Exception as e:
+                logger.warning(f"[COINGECKO] {coin_id}: {e}")
+                return None
+
+        if data is None:
+            logger.warning(f"[COINGECKO] {coin_id}: falhou após 3 tentativas")
+            return None
 
         market = data.get("market_data", {})
         community = data.get("community_data", {})
@@ -228,7 +244,7 @@ def scan_crypto() -> list[dict]:
         signals.append(signal)
 
         # Pausa entre requisições para respeitar rate limit do CoinGecko
-        time.sleep(1.5)
+        time.sleep(3.0)
 
     return signals
 

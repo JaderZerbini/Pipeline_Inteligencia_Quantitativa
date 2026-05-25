@@ -485,7 +485,7 @@ with tab_validation:
 with tab_cripto:
     import subprocess
     import re
-    from datetime import timedelta
+    from datetime import timedelta, timezone
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -589,6 +589,16 @@ with tab_cripto:
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Última execução", last_run_str)
+    if last_raw is None:
+        c1.caption("▶ Execute o scheduler para popular")
+    else:
+        try:
+            _last_dt = datetime.fromisoformat(str(last_raw))
+            _hours_ago = (datetime.now(timezone.utc) - _last_dt).total_seconds() / 3600
+            if _hours_ago > 7:
+                c1.caption("⚠️ Scheduler pode estar parado")
+        except Exception:
+            pass
     c2.metric("Sinais hoje", today_count)
     c3.metric("Acionáveis (7d)", actionable_7d)
     c4.metric("Status API", "🟢 CoinGecko: gratuito")
