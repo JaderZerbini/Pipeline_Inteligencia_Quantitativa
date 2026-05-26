@@ -8,7 +8,7 @@ RSI is computed with Wilder's exponential smoothing — no TA-Lib or pandas_ta.
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -110,7 +110,7 @@ def _save_results(results: list[dict]) -> None:
     """Write results list to data/backtest_results.json."""
     _DATA_DIR.mkdir(exist_ok=True)
     payload = {
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "results": results,
     }
     with open(_RESULTS_PATH, "w", encoding="utf-8") as fh:

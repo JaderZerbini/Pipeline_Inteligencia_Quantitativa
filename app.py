@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import sys
@@ -296,7 +296,7 @@ with tab_ops:
                 signal_id=None,
                 ticker=ticker_val,
                 entry_price=entry_price,
-                entry_date=datetime.utcnow().date().isoformat(),
+                entry_date=datetime.now(timezone.utc).date().isoformat(),
                 stop_price=stop_price,
                 status="OPEN",
             )
@@ -503,12 +503,12 @@ with tab_cripto:
             with get_connection() as conn:
                 row = conn.execute("SELECT MAX(created_at) FROM crypto_signals").fetchone()
                 last_raw = row[0] if row and row[0] else None
-                today_str = datetime.utcnow().date().isoformat()
+                today_str = datetime.now(timezone.utc).date().isoformat()
                 today_count = conn.execute(
                     "SELECT COUNT(*) FROM crypto_signals WHERE DATE(created_at) = ?",
                     (today_str,),
                 ).fetchone()[0]
-                week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+                week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
                 actionable = conn.execute(
                     "SELECT COUNT(*) FROM crypto_signals "
                     "WHERE decision IN ('FORTE','MODERADO') AND created_at >= ?",

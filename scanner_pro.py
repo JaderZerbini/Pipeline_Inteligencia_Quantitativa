@@ -4,7 +4,7 @@ import pytz
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
-from datetime import datetime
+from datetime import datetime, timezone
 from db import save_signal
 
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
@@ -122,7 +122,7 @@ def scanner_pro(tickers: list[str] | None = None) -> pd.DataFrame:
             print(f"[SKIP] {ticker}: preço R${current_price:.2f} abaixo do mínimo")
             continue
 
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         # Entry signal: price above EMA-20 AND RSI in momentum zone (not exhausted)
         if current_price > last_row["EMA_20"] and 55 < last_row["RSI"] < 68:

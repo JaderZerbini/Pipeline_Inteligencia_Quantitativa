@@ -9,16 +9,41 @@ Não requer chaves de API — ambas as APIs são públicas e gratuitas.
 """
 
 import os
+import platform
 import time
 import logging
 import requests
-import certifi
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
-# Sessão com CA bundle explícito — necessário em alguns ambientes Windows
-_session = requests.Session()
-_session.verify = certifi.where()
+
+def _build_session() -> requests.Session:
+    """Creates a requests session with retry logic and correct SSL certs."""
+    session = requests.Session()
+
+    # Retry on transient server errors (429 handled separately in get_coingecko_data)
+    retry = Retry(
+        total=2,
+        backoff_factor=1,
+        status_forcelist=[500, 502, 503, 504],
+        allowed_methods=["GET"],
+    )
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+
+    # SSL: certifi bundle on Windows, system certs on Linux (GitHub Actions)
+    if platform.system() == "Windows":
+        try:
+            import certifi
+            session.verify = certifi.where()
+        except ImportError:
+            pass  # fall back to system certs
+
+    return session
+
+
+_session = _build_session()
 
 load_dotenv()
 

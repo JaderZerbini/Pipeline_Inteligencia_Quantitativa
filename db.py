@@ -1,8 +1,11 @@
 """Persistence layer for Terminal Quant using SQLite (stdlib only)."""
 
+import logging
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DB_DIR = Path("data")
 DB_PATH = DB_DIR / "terminal_quant.db"
@@ -11,11 +14,63 @@ DB_PATH = DB_DIR / "terminal_quant.db"
 def _connect() -> sqlite3.Connection:
     """Open a connection to the database, creating the data/ directory if needed."""
     DB_DIR.mkdir(exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    return conn
 
 
 # Public alias used by crypto_main.py and app.py
 get_connection = _connect
+
+
+def get_schema_version(conn: sqlite3.Connection) -> int:
+    """Returns current schema version, 0 if never set."""
+    try:
+        row = conn.execute(
+            "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
+        ).fetchone()
+        return row[0] if row else 0
+    except Exception:
+        return 0
+
+
+def run_migrations(conn: sqlite3.Connection) -> None:
+    """Applies pending schema migrations in order."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version    INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+
+    current = get_schema_version(conn)
+
+    # Add new migrations here as the schema evolves.
+    # Each migration is a (version, sql) tuple.
+    # Never modify existing migrations — only add new ones.
+    migrations = [
+        (1, "SELECT 1"),  # baseline — schema already exists
+        (2, "CREATE INDEX IF NOT EXISTS idx_signals_ticker ON signals(ticker)"),
+        (3, "CREATE INDEX IF NOT EXISTS idx_crypto_signals_symbol "
+            "ON crypto_signals(symbol, created_at)"),
+        (4, "CREATE INDEX IF NOT EXISTS idx_cooldowns_lookup "
+            "ON signal_cooldowns(ticker, pipeline, sent_at)"),
+    ]
+
+    for version, sql in migrations:
+        if version > current:
+            try:
+                conn.execute(sql)
+                conn.execute(
+                    "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+                    (version, datetime.now(timezone.utc).isoformat()),
+                )
+                conn.commit()
+                logger.info(f"[DB] Migração {version} aplicada")
+            except Exception as e:
+                logger.error(f"[DB] Migração {version} falhou: {e}")
 
 
 def init_db() -> None:
@@ -114,6 +169,7 @@ def init_db() -> None:
             );
         """)
         conn.commit()
+        run_migrations(conn)
 
 
 def is_in_cooldown(ticker: str, pipeline: str = 'b3', hours: int = 4) -> bool:
@@ -283,7 +339,7 @@ def get_signals_history(days: int = 30) -> list[dict]:
     Returns:
         List of row dicts, each key matching a column in the signals table.
     """
-    since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     with _connect() as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.execute(
@@ -317,7 +373,7 @@ def close_operation(
         pnl_brl:    Realised profit/loss per share in BRL (exit - entry).
         status:     'STOPPED' for trailing-stop exits, 'CLOSED' for manual.
     """
-    exit_date = datetime.utcnow().isoformat()
+    exit_date = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
         conn.execute(
             """
