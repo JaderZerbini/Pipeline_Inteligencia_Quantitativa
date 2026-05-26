@@ -1,5 +1,11 @@
 """Deterministic decision engine: maps signal + audit data to a recommendation."""
 
+import logging
+
+from db import is_in_cooldown, register_cooldown
+
+logger = logging.getLogger(__name__)
+
 # Tickers that passed the 2-year backtest filter (win_rate >= 55%, sharpe >= 0.5).
 # Signals for unlisted tickers are downgraded from MODERADO to AGUARDAR.
 BACKTEST_APPROVED = ["SBSP3", "VALE3", "ITUB4", "PETR4", "B3SA3", "BBDC4"]
@@ -97,6 +103,15 @@ def evaluate_signal(signal: dict, audit: dict, macro: dict = None) -> dict:
     elif ticker_clean not in BACKTEST_APPROVED and recommendation == "MODERADO":
         recommendation = "AGUARDAR"
         reasons.append("Ativo sem validacao historica suficiente — sinal rebaixado")
+
+    # Cooldown gate: suppress repeated actionable signals within 4 hours
+    if recommendation in ("FORTE", "MODERADO"):
+        if is_in_cooldown(ticker_clean, pipeline='b3', hours=4):
+            logger.info(f"[COOLDOWN] {ticker_clean}: sinal suprimido (cooldown 4h)")
+            recommendation = "AGUARDAR"
+            reasons.append("Cooldown ativo (4h desde último sinal) — aguarde nova janela")
+        else:
+            register_cooldown(ticker_clean, pipeline='b3')
 
     confidence = _BASE_CONFIDENCE[recommendation]
 

@@ -29,10 +29,11 @@ load_dotenv()
 # Módulos do pipeline cripto
 from crypto_scanner import scan_crypto
 from crypto_decision import evaluate_signal, format_telegram_message
+from crypto_monitor import check_stops, open_position
 
 # Módulos existentes do Terminal Quant (não modificados)
 from alerts import send_alert
-from db import get_connection
+from db import get_connection, init_db
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +106,10 @@ def run_pipeline(dry_run: bool = False) -> None:
         print("Modo: PRODUÇÃO")
     print("=" * 60)
 
-    # 1. Coleta de dados (Binance + LunarCrush)
+    # 0. Garantir que tabelas existam (inclui signal_cooldowns e crypto_positions)
+    init_db()
+
+    # 1. Coleta de dados (Binance + CoinGecko)
     logger.info("Iniciando varredura dos pares cripto...")
     signals = scan_crypto()
 
@@ -113,6 +117,12 @@ def run_pipeline(dry_run: bool = False) -> None:
         logger.warning("Nenhum par retornou dados. Encerrando pipeline.")
         print("Pipeline cripto concluído.")
         return
+
+    # 1b. Verificar trailing stops com preços atuais antes de avaliar novos sinais
+    current_prices = {s["symbol"]: s["price"] for s in signals}
+    triggered = check_stops(current_prices, dry_run=dry_run)
+    if triggered:
+        logger.info(f"[MONITOR] {len(triggered)} stop(s) atingido(s) neste ciclo")
 
     print(f"\n{len(signals)} pares coletados.\n")
 
@@ -159,6 +169,8 @@ def run_pipeline(dry_run: bool = False) -> None:
                     logger.info(f"[TELEGRAM] Alerta enviado: {result['symbol']} {result['decision']}")
                 except Exception as e:
                     logger.error(f"[TELEGRAM] Falha ao enviar {result['symbol']}: {e}")
+                # Registra posição para trailing stop
+                open_position(signal["symbol"], signal["price"])
     else:
         print("\nNenhum sinal acionável neste ciclo.")
 

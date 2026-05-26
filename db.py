@@ -90,6 +90,55 @@ def init_db() -> None:
             );
         """)
         conn.commit()
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS signal_cooldowns (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker   TEXT NOT NULL,
+                pipeline TEXT NOT NULL DEFAULT 'b3',
+                sent_at  TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_cooldowns_ticker
+                ON signal_cooldowns(ticker, pipeline, sent_at);
+
+            CREATE TABLE IF NOT EXISTS crypto_positions (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol        TEXT NOT NULL,
+                entry_price   REAL NOT NULL,
+                highest_price REAL NOT NULL,
+                stop_pct      REAL NOT NULL DEFAULT 0.07,
+                status        TEXT NOT NULL DEFAULT 'open',
+                opened_at     TEXT NOT NULL,
+                closed_at     TEXT,
+                close_price   REAL,
+                close_reason  TEXT
+            );
+        """)
+        conn.commit()
+
+
+def is_in_cooldown(ticker: str, pipeline: str = 'b3', hours: int = 4) -> bool:
+    """Returns True if ticker already had an actionable signal in the last N hours."""
+    from datetime import datetime, timezone, timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with get_connection() as conn:
+        row = conn.execute(
+            """SELECT 1 FROM signal_cooldowns
+               WHERE ticker = ? AND pipeline = ?
+               AND sent_at >= ? LIMIT 1""",
+            (ticker, pipeline, cutoff),
+        ).fetchone()
+    return row is not None
+
+
+def register_cooldown(ticker: str, pipeline: str = 'b3') -> None:
+    """Records that an actionable signal was sent for this ticker right now."""
+    from datetime import datetime, timezone
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO signal_cooldowns (ticker, pipeline, sent_at) VALUES (?, ?, ?)",
+            (ticker, pipeline, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
 
 
 def save_signal(

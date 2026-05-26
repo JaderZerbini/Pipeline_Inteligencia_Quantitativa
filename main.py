@@ -1,4 +1,3 @@
-import asyncio
 import threading
 import time
 from datetime import datetime
@@ -9,7 +8,7 @@ from news_fetcher import buscar_noticias_ticker
 from decision_engine import evaluate_signal
 from macro_monitor import fetch_macro_snapshot, evaluate_macro
 from monitor import check_stops
-from alerts import TelegramAlert
+from alerts import TelegramAlert, send_alert
 
 # Tickers managed in scanner_pro.py (TICKERS + Brapi top-20 merge).
 # Pass an override list here only when testing specific assets.
@@ -164,7 +163,12 @@ def orquestrar_investimento() -> list[dict]:
             )
             if macro_result.get("warnings"):
                 summary += "\n⚠️ Contexto macro: " + " | ".join(macro_result["warnings"])
-            asyncio.run(messenger.enviar_alerta_compra(ticker, row["RSI"], summary))
+            send_alert(
+                f"🚀 *SINAL DE COMPRA: {ticker}*\n\n"
+                f"📈 RSI: {row['RSI']:.2f}\n"
+                f"🛡️ ANÁLISE IA:\n{summary}\n\n"
+                f"💡 Verifique seu app do Nubank!"
+            )
 
     # Relatório no terminal
     print("\n" + "=" * 50)

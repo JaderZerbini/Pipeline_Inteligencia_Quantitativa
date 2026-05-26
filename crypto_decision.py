@@ -20,10 +20,8 @@ import logging
 import threading
 from datetime import datetime, timezone
 
-# Reaproveitando o sentiment_analyzer.py existente sem modificação
-# Ele já usa OpenRouter com DeepSeek (40%) + Llama (35%) + Gemini (25%)
-# Função pública: analyze_news(headline, ticker) → {score, verdict, reason, ...}
-from sentiment_analyzer import analyze_news
+from db import is_in_cooldown, register_cooldown
+from sentiment_analyzer import analyze_crypto
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +30,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Sinal FORTE: todos os critérios atendidos
-STRONG_RSI_MAX = 35          # RSI abaixo disso = sobrevendido em cripto
-STRONG_GALAXY_MIN = 55       # Galaxy Score mínimo (evita moedas sem liquidez social)
-STRONG_CHANGE_MAX = -5.0     # Queda mínima nas últimas 24h para entrada de recuperação
+STRONG_RSI_MAX = 32          # RSI abaixo disso = sobrevendido em cripto
+STRONG_GALAXY_MIN = 52       # Composite momentum score — exige momentum positivo
+STRONG_CHANGE_MAX = -3.0     # Queda mínima 24h para entrada de recuperação
 STRONG_AI_SCORE_MIN = 65     # Score mínimo do consenso das IAs
 
 # Sinal MODERADO: critérios relaxados
-MODERATE_RSI_MAX = 42
-MODERATE_GALAXY_MIN = 45
+MODERATE_RSI_MAX = 40
+MODERATE_GALAXY_MIN = 48
 MODERATE_AI_SCORE_MIN = 55
 
 # Bloqueio por manipulação (detecção nas IAs)
@@ -54,24 +52,19 @@ AI_TIMEOUT_SECONDS = 25
 # ---------------------------------------------------------------------------
 
 def _build_crypto_prompt(signal: dict) -> str:
-    """Constrói o prompt enviado às IAs para análise do sinal cripto."""
-    return f"""Analise o seguinte sinal de mercado para cripto e responda APENAS no formato JSON:
-
-Ativo: {signal['symbol']}
-Preço atual: ${signal['price']:,.2f}
-Variação 24h: {signal.get('change_pct_24h', 0):+.2f}%
-RSI(1h): {signal.get('rsi_1h', 'N/A')}
-Galaxy Score (LunarCrush): {signal.get('galaxy_score', 'N/A')} / 100
-Volume social 24h: {signal.get('social_volume_24h', 'N/A')}
-Sentimento social: {signal.get('sentiment', 'unknown')}
-
-Avalie:
-1. Há sinais de pump-and-dump coordenado nas redes sociais?
-2. O volume social é orgânico ou artificialmente inflado?
-3. O RSI e sentimento são consistentes entre si?
-
-Responda SOMENTE com JSON neste formato exato:
-{{"score": 0-100, "veredicto": "CONFIAVEL|RUIDO|MANIPULACAO|PUMP|FUD_COORDENADO", "razao": "uma frase curta"}}"""
+    """Constrói o prompt de dados enviado às IAs (contexto vem do system message)."""
+    return (
+        f"Ativo: {signal['symbol']}\n"
+        f"Preço: ${signal['price']:,.2f}\n"
+        f"Variação 24h: {signal.get('change_pct_24h', 0):+.2f}%\n"
+        f"RSI(1h): {signal.get('rsi_1h', 'N/A')}\n"
+        f"Galaxy Score: {signal.get('galaxy_score', 'N/A')} / 100\n"
+        f"Volume social 24h: {signal.get('social_volume_24h', 'N/A')}\n"
+        f"Sentimento: {signal.get('sentiment', 'unknown')}\n\n"
+        'Responda SOMENTE com JSON: '
+        '{"score": 0-100, "verdict": "CONFIAVEL|RUIDO|MANIPULACAO|PUMP|FUD_COORDENADO", '
+        '"reason": "uma frase curta", "flags": []}'
+    )
 
 
 def _get_ai_consensus(signal: dict) -> dict:
@@ -86,10 +79,8 @@ def _get_ai_consensus(signal: dict) -> dict:
         nonlocal result
         try:
             prompt = _build_crypto_prompt(signal)
-            # analyze_news aceita headline + ticker; passamos o prompt cripto como headline
-            consensus = analyze_news(headline=prompt, ticker=signal["symbol"])
+            consensus = analyze_crypto(prompt)
             if consensus:
-                # Mapeia verdict/reason → veredicto/razao esperados pelo evaluate_signal
                 result = {
                     "score":     consensus.get("score", 50),
                     "veredicto": consensus.get("verdict", "RUIDO"),
@@ -183,22 +174,34 @@ def evaluate_signal(signal: dict, call_ai: bool = True) -> dict:
         reasons.append(f"RSI={rsi} (≤{STRONG_RSI_MAX})")
         reasons.append(f"Galaxy={galaxy} (≥{STRONG_GALAXY_MIN})")
         reasons.append(f"Queda 24h={change:+.1f}% (≤{STRONG_CHANGE_MAX}%)")
-        return _make_result(symbol, "FORTE", ai_score, ai_veredicto, reasons)
+        final_decision = "FORTE"
 
     # MODERADO: critérios relaxados
-    if (rsi <= MODERATE_RSI_MAX
+    elif (rsi <= MODERATE_RSI_MAX
             and galaxy_ok_moderate
             and ai_ok_moderate):
         reasons.append(f"RSI={rsi} (≤{MODERATE_RSI_MAX})")
         reasons.append(f"Galaxy={galaxy} (≥{MODERATE_GALAXY_MIN})")
-        return _make_result(symbol, "MODERADO", ai_score, ai_veredicto, reasons)
+        final_decision = "MODERADO"
 
     # AGUARDAR: critérios insuficientes
-    reasons.append(
-        f"Critérios insuficientes — RSI={rsi}, galaxy={galaxy}, "
-        f"change={change:+.1f}%, ai_score={ai_score}"
-    )
-    return _make_result(symbol, "AGUARDAR", ai_score, ai_veredicto, reasons)
+    else:
+        reasons.append(
+            f"Critérios insuficientes — RSI={rsi}, galaxy={galaxy}, "
+            f"change={change:+.1f}%, ai_score={ai_score}"
+        )
+        final_decision = "AGUARDAR"
+
+    # Cooldown gate: suprime sinais repetidos para o mesmo ativo em 4 horas
+    if final_decision in ("FORTE", "MODERADO"):
+        if is_in_cooldown(symbol, pipeline='cripto', hours=4):
+            logger.info(f"[COOLDOWN] {symbol}: sinal suprimido (cooldown 4h)")
+            reasons.insert(0, "Cooldown ativo (4h desde último sinal)")
+            final_decision = "AGUARDAR"
+        else:
+            register_cooldown(symbol, pipeline='cripto')
+
+    return _make_result(symbol, final_decision, ai_score, ai_veredicto, reasons)
 
 
 def _make_result(symbol, decision, ai_score, ai_veredicto, reasons) -> dict:
@@ -217,8 +220,22 @@ def _make_result(symbol, decision, ai_score, ai_veredicto, reasons) -> dict:
 # Formatar mensagem para o Telegram
 # ---------------------------------------------------------------------------
 
+def _count_open_crypto_positions() -> int:
+    """Retorna número de posições cripto abertas no banco."""
+    try:
+        from db import get_connection
+        with get_connection() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM crypto_positions WHERE status='open'"
+            ).fetchone()[0]
+    except Exception:
+        return 0
+
+
 def format_telegram_message(signal: dict, result: dict) -> str:
     """Formata o alerta que será enviado via alerts.py existente."""
+    from position_sizing import calculate_position
+
     emoji = {"FORTE": "🟢", "MODERADO": "🟡", "AGUARDAR": "⬜", "BLOQUEADO": "🔴"}
     icon = emoji.get(result["decision"], "⬜")
 
@@ -232,6 +249,21 @@ def format_telegram_message(signal: dict, result: dict) -> str:
         "",
         *[f"• {r}" for r in result["reasons"][:3]],
     ]
+
+    if result["decision"] in ("FORTE", "MODERADO"):
+        open_pos = _count_open_crypto_positions()
+        sizing = calculate_position(result["decision"], 1000.0, open_pos, signal["price"])
+        if sizing["allowed"]:
+            lines += [
+                "",
+                f"💰 Sugestão: ${sizing['alloc_value']:.2f} "
+                f"({sizing['alloc_pct']*100:.0f}% de $1.000)",
+                f"   = {sizing['units']:.4f} unidades",
+                "   ⚠️ Capital padrão: ajuste no dashboard",
+            ]
+        else:
+            lines += ["", f"⛔ Sizing: {sizing['reason']}"]
+
     return "\n".join(lines)
 
 

@@ -82,23 +82,35 @@ def _parse_gemini_json(text: str) -> dict:
 # OpenRouter: per-model call + weighted consensus
 # ---------------------------------------------------------------------------
 
-def _call_model(model_id: str, prompt: str, result: dict, key: str) -> None:
+def _call_model(
+    model_id: str,
+    prompt: str,
+    result: dict,
+    key: str,
+    system_override: str | None = None,
+) -> None:
     """Call a single OpenRouter model and store the parsed result in shared dict.
 
     Args:
-        model_id: OpenRouter model identifier.
-        prompt:   Prompt string sent to the model.
-        result:   Shared dict where ``result[key]`` is written on success.
-        key:      Short alias used as dict key ('gemini', 'llama', 'mistral').
+        model_id:        OpenRouter model identifier.
+        prompt:          Prompt string sent to the model.
+        result:          Shared dict where ``result[key]`` is written on success.
+        key:             Short alias used as dict key ('gemini', 'llama', 'mistral').
+        system_override: Optional system message injected before the user turn.
+                         When None, no system message is sent (B3 default path).
     """
     try:
         client = OpenAI(
             base_url=_OPENROUTER_BASE_URL,
             api_key=os.getenv("OPENROUTER_API_KEY"),
         )
+        messages = []
+        if system_override:
+            messages.append({"role": "system", "content": system_override})
+        messages.append({"role": "user", "content": prompt})
         response = client.chat.completions.create(
             model=model_id,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             timeout=20,
         )
         raw = response.choices[0].message.content
@@ -161,23 +173,36 @@ def _weighted_consensus(results: dict) -> dict:
     }
 
 
-def _run_consensus(prompt: str) -> dict | None:
+def _run_consensus(prompt: str, system_override: str | None = None) -> dict | None:
     """Launch all model threads in parallel and return the weighted consensus.
 
     Threads share a wall-clock deadline of 22 seconds so that slower models
-    do not add waiting time on top of faster ones.
+    do not add waiting time on top of faster ones. A threading.Lock protects
+    the shared results dict against concurrent writes.
+
+    Args:
+        prompt:          User-turn prompt sent to each model.
+        system_override: Optional system message (e.g. crypto analyst persona).
 
     Returns:
         Consensus dict, or ``None`` if every model call failed (triggers
         Gemini fallback in the caller).
     """
     results: dict = {}
+    results_lock = threading.Lock()
     threads: list[threading.Thread] = []
+
+    def _locked_call(model_id, prompt, key, system_override):
+        """Wrapper that writes to results under the lock."""
+        tmp: dict = {}
+        _call_model(model_id, prompt, tmp, key, system_override)
+        with results_lock:
+            results[key] = tmp.get(key)
 
     for model in _MODELS:
         t = threading.Thread(
-            target=_call_model,
-            args=(model["id"], prompt, results, model["label"]),
+            target=_locked_call,
+            args=(model["id"], prompt, model["label"], system_override),
             daemon=True,
         )
         threads.append(t)
@@ -189,11 +214,24 @@ def _run_consensus(prompt: str) -> dict | None:
         remaining = max(0.0, deadline - time.time())
         t.join(timeout=remaining)
 
-    available = {k: v for k, v in results.items() if v is not None}
+    with results_lock:
+        final_results = dict(results)
+
+    available = {k: v for k, v in final_results.items() if v is not None}
     if not available:
         return None  # signal caller to try Gemini fallback
 
-    return _weighted_consensus(results)
+    if len(available) == 1:
+        # Only one model responded — flag as low confidence but still return
+        single = list(available.values())[0]
+        if single:
+            single = dict(single)
+            single["low_confidence"] = True
+            single.setdefault("flags", [])
+            single["flags"].append("LOW_CONFIDENCE:1/3")
+        return single
+
+    return _weighted_consensus(final_results)
 
 
 # ---------------------------------------------------------------------------
@@ -235,8 +273,57 @@ def _persist(signal_id: int, result: dict, headline: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Crypto-specific system prompt
+# ---------------------------------------------------------------------------
+
+_CRYPTO_SYSTEM = (
+    "Você é um analista especializado em mercados de criptomoedas. "
+    "Avalie sinais de manipulação social (pump-and-dump, FUD coordenado), "
+    "verifique se o volume social é orgânico e se o RSI é consistente com o sentimento. "
+    "Responda APENAS com JSON válido no formato: "
+    '{"score": 0-100, "verdict": "CONFIAVEL|RUIDO|MANIPULACAO|PUMP|FUD_COORDENADO", '
+    '"reason": "uma frase curta", "flags": []}. '
+    "Score: 70-100=sinal confiável, 40-69=incerto, 0-39=manipulação ou FUD."
+)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+def analyze_crypto(prompt: str) -> dict:
+    """Audit a crypto signal via multi-model consensus with crypto-specific context.
+
+    Unlike analyze_news (B3 context), uses a crypto-specialist system prompt
+    and accepts the pre-built signal prompt directly — no B3 headline wrapping.
+
+    Args:
+        prompt: Pre-built signal data string from crypto_decision._build_crypto_prompt().
+
+    Returns:
+        Dict with keys: score, verdict, reason, flags.
+    """
+    if os.getenv("OPENROUTER_API_KEY"):
+        try:
+            consensus = _run_consensus(prompt, system_override=_CRYPTO_SYSTEM)
+            if consensus is not None:
+                return consensus
+        except Exception:
+            pass
+        print("[WARN] OpenRouter indisponível — usando Gemini direto como fallback")
+
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if gemini_key:
+        full_prompt = f"{_CRYPTO_SYSTEM}\n\n{prompt}"
+        future = _gemini_executor.submit(_call_gemini_direct, gemini_key, full_prompt)
+        try:
+            raw = future.result(timeout=20)
+            return _parse_gemini_json(raw)
+        except Exception as e:
+            print(f"[GEMINI ERROR] {type(e).__name__}: {e}")
+
+    return dict(_FALLBACK_AUDIT)
+
 
 def analyze_news(headline: str, ticker: str, signal_id: int | None = None) -> dict:
     """Audit a news headline via multi-model consensus with Gemini fallback.
