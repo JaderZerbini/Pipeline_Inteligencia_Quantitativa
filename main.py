@@ -1,3 +1,6 @@
+import logging
+import os
+import sys
 import threading
 import time
 from datetime import datetime
@@ -9,6 +12,18 @@ from decision_engine import evaluate_signal
 from macro_monitor import fetch_macro_snapshot, evaluate_macro
 from monitor import check_stops
 from alerts import TelegramAlert, send_alert
+
+os.makedirs("data", exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("data/b3_pipeline.log", encoding="utf-8"),
+    ],
+)
+logger = logging.getLogger(__name__)
 
 # Tickers managed in scanner_pro.py (TICKERS + Brapi top-20 merge).
 # Pass an override list here only when testing specific assets.
@@ -54,19 +69,19 @@ def orquestrar_investimento() -> list[dict]:
         List of decision dicts for each scanned ticker, consumed by Streamlit.
     """
     init_db()
-    print("=== INICIANDO PIPELINE DE INTELIGÊNCIA QUANTITATIVA ===")
+    logger.info("=== INICIANDO PIPELINE DE INTELIGÊNCIA QUANTITATIVA ===")
 
     # PASSO 1: Scanner Técnico — retorna DataFrame com signal_id já persistido
     df_foguetes = scanner_pro()
 
     if df_foguetes is None or df_foguetes.empty:
-        print("Nenhuma oportunidade técnica encontrada no momento.")
+        logger.info("Nenhuma oportunidade técnica encontrada no momento.")
         return []
 
     messenger = TelegramAlert()
     decisoes_finais: list[dict] = []
 
-    print(f"\nAnalisando {len(df_foguetes)} ativo(s) selecionado(s) pelo Scanner...")
+    logger.info(f"Analisando {len(df_foguetes)} ativo(s) selecionado(s) pelo Scanner...")
 
     # Fetch macro context once — evaluate_macro uses this snapshot per ticker
     macro_snapshot = fetch_macro_snapshot()
@@ -74,7 +89,7 @@ def orquestrar_investimento() -> list[dict]:
     minerio = macro_snapshot.get("iron_ore")
     usdbrl = macro_snapshot.get("usdbrl")
     selic  = macro_snapshot.get("selic")
-    print(
+    logger.info(
         f"Macro: Brent {brent['change_pct']:+.1f}% | "
         f"Minério {minerio['change_pct']:+.1f}% | "
         f"USD/BRL {usdbrl['change_pct']:+.1f}% | "
@@ -91,7 +106,7 @@ def orquestrar_investimento() -> list[dict]:
         macro_result = evaluate_macro(ticker, macro_snapshot)
 
         # PASSO 2b: Buscar manchetes (síncrono, ~200-400 ms)
-        print(f"[{ticker}] Buscando notícias...")
+        logger.info(f"[{ticker}] Buscando notícias...")
         headline = buscar_noticias_ticker(ticker)
 
         # PASSO 3: Auditoria Gemini em thread daemon — bloqueia até 12s ou até responder
@@ -115,18 +130,18 @@ def orquestrar_investimento() -> list[dict]:
             if consensus_flag:
                 n_models = consensus_flag.split(":")[1]
                 models_str = "·".join(audit.get("models_used", []))
-                print(
+                logger.info(
                     f"[{ticker}] Consensus {n_models} | "
                     f"score={audit['score']} | {audit['verdict']} ({models_str})"
                 )
             else:
-                print(
+                logger.info(
                     f"[{ticker}] respondeu em {elapsed:.1f}s | "
                     f"score={audit['score']} | {audit['verdict']}"
                 )
         else:
             audit = dict(_FALLBACK_AUDIT)
-            print(f"[{ticker}] timeout — usando fallback")
+            logger.warning(f"[{ticker}] timeout — usando fallback")
 
         # PASSO 4: Decisão com o audit real (ou fallback se timeout)
         signal_dict = {
@@ -138,7 +153,7 @@ def orquestrar_investimento() -> list[dict]:
         decision = evaluate_signal(signal_dict, audit, macro=macro_result)
         update_signal_recommendation(signal_id, decision["recommendation"])
 
-        print(
+        logger.info(
             f"[{ticker}] RSI={row['RSI']:.2f} | vol={row['volume_ratio']:.2f}x | "
             f"{decision['recommendation']} (confiança={decision['confidence']:.0%})"
         )
@@ -180,13 +195,16 @@ def orquestrar_investimento() -> list[dict]:
             print(f"  • {reason}")
 
     # PASSO 6: Verificar trailing stops para posições abertas
-    print("\n--- Verificando trailing stops ---")
+    logger.info("--- Verificando trailing stops ---")
     triggered = check_stops(messenger)
     if triggered:
         for t in triggered:
-            print(f"[STOP] {t['ticker']} | entrada R${t['entry']:.2f} | saída R${t['exit']:.2f} | P&L R${t['pnl_brl']:+.2f}")
+            logger.info(
+                f"[STOP] {t['ticker']} | entrada R${t['entry']:.2f} | "
+                f"saída R${t['exit']:.2f} | P&L R${t['pnl_brl']:+.2f}"
+            )
     else:
-        print("Nenhum stop acionado.")
+        logger.info("Nenhum stop acionado.")
 
     return decisoes_finais
 

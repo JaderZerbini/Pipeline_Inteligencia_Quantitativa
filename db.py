@@ -57,6 +57,53 @@ def run_migrations(conn: sqlite3.Connection) -> None:
             "ON crypto_signals(symbol, created_at)"),
         (4, "CREATE INDEX IF NOT EXISTS idx_cooldowns_lookup "
             "ON signal_cooldowns(ticker, pipeline, sent_at)"),
+        (5, """
+            CREATE TABLE IF NOT EXISTS paper_portfolio (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT NOT NULL DEFAULT 'Principal',
+                initial_capital REAL NOT NULL DEFAULT 5000.0,
+                current_capital REAL NOT NULL DEFAULT 5000.0,
+                pipeline        TEXT NOT NULL DEFAULT 'both',
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL
+            )
+        """),
+        (6, """
+            CREATE TABLE IF NOT EXISTS paper_trades (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                portfolio_id    INTEGER NOT NULL
+                                REFERENCES paper_portfolio(id),
+                pipeline        TEXT NOT NULL,
+                symbol          TEXT NOT NULL,
+                side            TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
+                price           REAL NOT NULL,
+                quantity        REAL NOT NULL,
+                value           REAL NOT NULL,
+                signal_decision TEXT,
+                ai_score        INTEGER,
+                reason          TEXT,
+                traded_at       TEXT NOT NULL
+            )
+        """),
+        (7, """
+            CREATE TABLE IF NOT EXISTS paper_positions (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                portfolio_id    INTEGER NOT NULL
+                                REFERENCES paper_portfolio(id),
+                pipeline        TEXT NOT NULL,
+                symbol          TEXT NOT NULL,
+                entry_price     REAL NOT NULL,
+                quantity        REAL NOT NULL,
+                current_price   REAL,
+                stop_price      REAL,
+                status          TEXT NOT NULL DEFAULT 'open'
+                                CHECK(status IN ('open','closed')),
+                opened_at       TEXT NOT NULL,
+                closed_at       TEXT,
+                pnl             REAL,
+                pnl_pct         REAL
+            )
+        """),
     ]
 
     for version, sql in migrations:
@@ -170,6 +217,26 @@ def init_db() -> None:
         """)
         conn.commit()
         run_migrations(conn)
+        ensure_default_portfolio()
+
+
+def ensure_default_portfolio() -> int:
+    """Creates the default paper trading portfolio if none exists. Returns its ID."""
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM paper_portfolio LIMIT 1"
+        ).fetchone()
+        if existing:
+            return existing[0]
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = conn.execute(
+            "INSERT INTO paper_portfolio "
+            "(name, initial_capital, current_capital, pipeline, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("Principal", 5000.0, 5000.0, "both", now, now),
+        )
+        conn.commit()
+        return cursor.lastrowid
 
 
 def is_in_cooldown(ticker: str, pipeline: str = 'b3', hours: int = 4) -> bool:

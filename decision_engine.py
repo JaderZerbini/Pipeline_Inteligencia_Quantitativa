@@ -1,14 +1,66 @@
 """Deterministic decision engine: maps signal + audit data to a recommendation."""
 
+import json
 import logging
+import os
 
 from db import is_in_cooldown, register_cooldown
 
 logger = logging.getLogger(__name__)
 
-# Tickers that passed the 2-year backtest filter (win_rate >= 55%, sharpe >= 0.5).
-# Signals for unlisted tickers are downgraded from MODERADO to AGUARDAR.
-BACKTEST_APPROVED = ["SBSP3", "VALE3", "ITUB4", "PETR4", "B3SA3", "BBDC4"]
+
+def _load_approved_tickers() -> set:
+    """Loads approved tickers from backtest results file.
+
+    Approval criteria (derived from metrics when no explicit 'approved' flag):
+      win_rate >= 55% AND sharpe_ratio >= 0.5
+
+    Actual file format (data/backtest_results.json):
+      {"results": [{"ticker": "PETR4.SA", "win_rate": 75.0, "sharpe_ratio": 1.01, ...}]}
+    Tickers include '.SA' suffix — stripped here to match signal dict usage.
+    Falls back to hardcoded set if file is missing or unreadable.
+    """
+    results_path = os.path.join("data", "backtest_results.json")
+    fallback = {"SBSP3", "VALE3", "ITUB4", "PETR4", "B3SA3", "BBDC4"}
+
+    try:
+        if not os.path.exists(results_path):
+            logger.warning(
+                "[BACKTEST] backtest_results.json não encontrado — usando lista fallback"
+            )
+            return fallback
+
+        with open(results_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if "approved" in data:
+            # Explicit allowlist: {"approved": ["PETR4", ...]}
+            return {t.replace(".SA", "") for t in data["approved"]}
+
+        if "results" in data:
+            # Derive from metrics — supports both explicit flag and threshold logic
+            approved = set()
+            for r in data["results"]:
+                if r.get("approved", False):
+                    approved.add(r["ticker"].replace(".SA", ""))
+                elif r.get("win_rate", 0) >= 55 and r.get("sharpe_ratio", 0) >= 0.5:
+                    approved.add(r["ticker"].replace(".SA", ""))
+            if not approved:
+                logger.warning("[BACKTEST] Nenhum ticker aprovado pelos critérios — usando fallback")
+                return fallback
+            logger.info(f"[BACKTEST] {len(approved)} tickers aprovados: {sorted(approved)}")
+            return approved
+
+        logger.warning("[BACKTEST] Formato inesperado em backtest_results.json — usando fallback")
+        return fallback
+
+    except Exception as e:
+        logger.warning(f"[BACKTEST] Erro ao ler resultados: {e} — usando fallback")
+        return fallback
+
+
+# Loaded once at import time — re-import or restart to pick up new backtest results.
+BACKTEST_APPROVED = _load_approved_tickers()
 
 _BASE_CONFIDENCE = {
     "FORTE": 0.90,
