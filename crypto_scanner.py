@@ -157,31 +157,55 @@ def get_coingecko_data(coin_id: str) -> dict | None:
         reddit_subscribers = community.get("reddit_subscribers", 0) or 0
         social_volume = twitter_followers + reddit_subscribers
 
-        # Build galaxy_score proxy (0-100) from price momentum
-        raw_score = 50  # neutral baseline
-        if change_1h  > 0: raw_score += 5
-        if change_1h  < 0: raw_score -= 5
-        if change_24h > 2: raw_score += 10
-        if change_24h < -2: raw_score -= 10
-        if change_7d  > 5: raw_score += 15
-        if change_7d  < -5: raw_score -= 15
-
         # Market cap rank as quality filter (lower rank = better)
         market_cap_rank = data.get("market_cap_rank", 999) or 999
-        if market_cap_rank <= 10: raw_score += 10
-        elif market_cap_rank <= 50: raw_score += 5
 
-        galaxy_score = max(0, min(100, raw_score))
+        # --- Composite momentum score (0-100) ---
+        # Uses multiple independent signals to reduce constant-55 problem
 
-        if galaxy_score >= 60:
+        score = 50.0  # neutral baseline
+
+        # Signal 1: short-term momentum (1h) — weight 15
+        if change_1h > 1.0:    score += 8
+        elif change_1h > 0.3:  score += 4
+        elif change_1h < -1.0: score -= 8
+        elif change_1h < -0.3: score -= 4
+
+        # Signal 2: medium-term momentum (24h) — weight 25
+        if change_24h > 5.0:    score += 15
+        elif change_24h > 2.0:  score += 8
+        elif change_24h > 0.5:  score += 3
+        elif change_24h < -5.0: score -= 15
+        elif change_24h < -2.0: score -= 8
+        elif change_24h < -0.5: score -= 3
+
+        # Signal 3: trend momentum (7d) — weight 20
+        if change_7d > 15.0:    score += 12
+        elif change_7d > 5.0:   score += 6
+        elif change_7d < -15.0: score -= 12
+        elif change_7d < -5.0:  score -= 6
+
+        # Signal 4: market cap quality — weight 10
+        if market_cap_rank <= 5:    score += 8
+        elif market_cap_rank <= 20: score += 5
+        elif market_cap_rank <= 50: score += 2
+        elif market_cap_rank > 200: score -= 5
+
+        # Signal 5: community size relative proxy — weight 10
+        if social_volume > 5_000_000:   score += 5
+        elif social_volume > 1_000_000: score += 2
+
+        momentum_score = round(max(0, min(100, score)))
+
+        if momentum_score >= 60:
             sentiment = "positive"
-        elif galaxy_score <= 40:
+        elif momentum_score <= 40:
             sentiment = "negative"
         else:
             sentiment = "neutral"
 
         return {
-            "galaxy_score": galaxy_score,
+            "momentum_score": momentum_score,
             "alt_rank": market_cap_rank,
             "social_volume_24h": social_volume,
             "sentiment": sentiment,
@@ -229,7 +253,7 @@ def scan_crypto() -> list[dict]:
             "change_pct_24h": ticker["change_pct_24h"],
             "volume_usdt_24h": ticker["volume_usdt_24h"],
             "rsi_1h": rsi,
-            "galaxy_score": social["galaxy_score"] if social else None,
+            "galaxy_score": social["momentum_score"] if social else None,
             "alt_rank": social["alt_rank"] if social else None,
             "social_volume_24h": social["social_volume_24h"] if social else None,
             "sentiment": social["sentiment"] if social else "unknown",
