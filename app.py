@@ -103,8 +103,8 @@ with st.sidebar:
 
 st.title("Auditoria em Tempo Real (Método Frank)")
 
-tab_scanner, tab_sinais, tab_ops, tab_bt, tab_validation, tab_cripto = st.tabs(
-    ["🔍 Scanner", "📈 Sinais", "💼 Operações", "🔬 Backtesting", "🧪 Validação", "🪙 Cripto"]
+tab_scanner, tab_sinais, tab_ops, tab_bt, tab_validation, tab_cripto, tab_paper = st.tabs(
+    ["🔍 Scanner", "📈 Sinais", "💼 Operações", "🔬 Backtesting", "🧪 Validação", "🪙 Cripto", "📊 Paper Trading"]
 )
 
 # ── Tab 1: Scanner ────────────────────────────────────────────────────────
@@ -797,3 +797,192 @@ with tab_cripto:
             st.line_chart(df_pivot)
         except Exception:
             pass
+
+# ── Tab 7: Paper Trading ──────────────────────────────────────────────────
+
+with tab_paper:
+    from paper_trading import (
+        get_portfolio,
+        get_open_positions,
+        get_portfolio_summary,
+        reset_portfolio,
+    )
+
+    def _paper_brt(utc_str: str) -> str:
+        try:
+            dt = datetime.fromisoformat(str(utc_str))
+            return (dt - timedelta(hours=3)).strftime("%d/%m %H:%M")
+        except Exception:
+            return str(utc_str)[:16] if utc_str else "—"
+
+    @st.cache_data(ttl=60)
+    def _load_paper_summary(pipeline: str) -> dict:
+        return get_portfolio_summary(pipeline)
+
+    @st.cache_data(ttl=60)
+    def _load_paper_trades(portfolio_id: int) -> "pd.DataFrame":
+        try:
+            with get_connection() as conn:
+                return pd.read_sql(
+                    "SELECT symbol, side, price, quantity, value, "
+                    "       signal_decision, ai_score, reason, traded_at "
+                    "FROM paper_trades "
+                    "WHERE portfolio_id = ? ORDER BY traded_at DESC LIMIT 50",
+                    conn,
+                    params=(portfolio_id,),
+                )
+        except Exception:
+            return pd.DataFrame()
+
+    st.subheader("📊 Paper Trading — Simulador R$5.000")
+    st.caption("Compras fictícias automáticas em sinais FORTE/MODERADO · Trailing stop 7%")
+
+    if st.button("🔄 Atualizar", key="paper_refresh"):
+        _load_paper_summary.clear()
+        _load_paper_trades.clear()
+        st.rerun()
+
+    # ── Section A: Portfolio cards ────────────────────────────────────────────
+
+    col_b3, col_cripto = st.columns(2)
+
+    for _col, _pipeline, _label in [
+        (col_b3, "b3", "B3"),
+        (col_cripto, "cripto", "Cripto"),
+    ]:
+        with _col:
+            _s = _load_paper_summary(_pipeline)
+            st.markdown(f"### {_label}")
+            st.metric(
+                "Capital atual",
+                f"R$ {_s['total_value']:,.2f}",
+                delta=f"{_s['total_return_pct']:+.2f}%",
+            )
+            _m1, _m2 = st.columns(2)
+            _m1.metric("P&L realizado", f"R$ {_s['total_pnl']:+.2f}")
+            _m2.metric("P&L não realizado", f"R$ {_s['unrealized_pnl']:+.2f}")
+            _m3, _m4 = st.columns(2)
+            _m3.metric("Win rate", f"{_s['win_rate']}%")
+            _m4.metric("Op. fechadas", _s["closed_trades"])
+
+    st.markdown("---")
+
+    # ── Section B: Open positions ─────────────────────────────────────────────
+
+    st.subheader("Posições abertas")
+
+    _b3_port = get_portfolio("b3")
+    _cripto_port = get_portfolio("cripto")
+    _all_pos = (
+        [{"Pipeline": "B3", **p} for p in get_open_positions(_b3_port["id"])]
+        + [{"Pipeline": "Cripto", **p} for p in get_open_positions(_cripto_port["id"])]
+    )
+
+    if _all_pos:
+        _df_pos = pd.DataFrame(_all_pos)
+        _df_pos = _df_pos.rename(columns={
+            "symbol":        "Ativo",
+            "entry_price":   "Entrada",
+            "current_price": "Atual",
+            "stop_price":    "Stop",
+            "pnl":           "P&L R$",
+            "pnl_pct":       "P&L %",
+        })
+        _keep = ["Pipeline", "Ativo", "Entrada", "Atual", "Stop", "P&L R$", "P&L %"]
+        _keep = [c for c in _keep if c in _df_pos.columns]
+
+        def _color_pnl_pct(series: pd.Series) -> list[str]:
+            return [
+                "color: #4caf50" if (v is not None and v > 0) else "color: #f44336"
+                for v in series
+            ]
+
+        _styled_pos = _df_pos[_keep].style
+        if "P&L %" in _df_pos.columns:
+            _styled_pos = _styled_pos.apply(_color_pnl_pct, subset=["P&L %"])
+        st.dataframe(_styled_pos, width="stretch")
+    else:
+        st.info("Nenhuma posição aberta no momento.")
+
+    st.markdown("---")
+
+    # ── Section C: Trade history ──────────────────────────────────────────────
+
+    st.subheader("Histórico")
+
+    _hist_b3, _hist_cripto = st.tabs(["B3", "Cripto"])
+
+    for _htab, _hpipeline, _hport in [
+        (_hist_b3, "b3", _b3_port),
+        (_hist_cripto, "cripto", _cripto_port),
+    ]:
+        with _htab:
+            _df_tr = _load_paper_trades(_hport["id"])
+            if _df_tr.empty:
+                st.info("Nenhum trade registrado ainda.")
+            else:
+                _df_tr = _df_tr.copy()
+                _df_tr["traded_at"] = _df_tr["traded_at"].apply(_paper_brt)
+                _df_tr = _df_tr.rename(columns={
+                    "symbol":          "Ativo",
+                    "side":            "Lado",
+                    "price":           "Preço",
+                    "quantity":        "Qtd",
+                    "value":           "Valor R$",
+                    "signal_decision": "Decisão",
+                    "ai_score":        "Score IA",
+                    "reason":          "Razão",
+                    "traded_at":       "Data/Hora BRT",
+                })
+
+                def _color_side(series: pd.Series) -> list[str]:
+                    return [
+                        "color: #4caf50" if v == "BUY" else "color: #f44336"
+                        for v in series
+                    ]
+
+                _styled_tr = _df_tr.style
+                if "Lado" in _df_tr.columns:
+                    _styled_tr = _styled_tr.apply(_color_side, subset=["Lado"])
+                st.dataframe(_styled_tr, width="stretch")
+
+    st.markdown("---")
+
+    # ── Section D: Controls ───────────────────────────────────────────────────
+
+    st.subheader("Controles")
+    _ctrl_b3, _ctrl_cripto = st.columns(2)
+
+    with _ctrl_b3:
+        if st.button("🔄 Resetar portfólio B3", key="reset_b3_btn"):
+            st.session_state["confirm_reset_b3"] = True
+        if st.session_state.get("confirm_reset_b3"):
+            st.warning("Isso apagará todo o histórico B3. Sem volta.")
+            _cy, _cn = st.columns(2)
+            if _cy.button("✅ Confirmar", key="yes_b3"):
+                reset_portfolio("b3")
+                _load_paper_summary.clear()
+                _load_paper_trades.clear()
+                st.session_state["confirm_reset_b3"] = False
+                st.success("Portfólio B3 resetado.")
+                st.rerun()
+            if _cn.button("❌ Cancelar", key="no_b3"):
+                st.session_state["confirm_reset_b3"] = False
+                st.rerun()
+
+    with _ctrl_cripto:
+        if st.button("🔄 Resetar portfólio Cripto", key="reset_cripto_btn"):
+            st.session_state["confirm_reset_cripto"] = True
+        if st.session_state.get("confirm_reset_cripto"):
+            st.warning("Isso apagará todo o histórico Cripto. Sem volta.")
+            _cy2, _cn2 = st.columns(2)
+            if _cy2.button("✅ Confirmar", key="yes_cripto"):
+                reset_portfolio("cripto")
+                _load_paper_summary.clear()
+                _load_paper_trades.clear()
+                st.session_state["confirm_reset_cripto"] = False
+                st.success("Portfólio Cripto resetado.")
+                st.rerun()
+            if _cn2.button("❌ Cancelar", key="no_cripto"):
+                st.session_state["confirm_reset_cripto"] = False
+                st.rerun()

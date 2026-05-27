@@ -104,6 +104,8 @@ def run_migrations(conn: sqlite3.Connection) -> None:
                 pnl_pct         REAL
             )
         """),
+        (8, "ALTER TABLE paper_positions ADD COLUMN close_price REAL"),
+        (9, "ALTER TABLE paper_positions ADD COLUMN close_reason TEXT"),
     ]
 
     for version, sql in migrations:

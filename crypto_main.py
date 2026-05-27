@@ -34,6 +34,7 @@ from crypto_monitor import check_stops, open_position
 # Módulos existentes do Terminal Quant (não modificados)
 from alerts import send_alert
 from db import get_connection, init_db
+from paper_trading import execute_paper_buy as _paper_buy, check_paper_stops as _check_paper_stops
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +125,11 @@ def run_pipeline(dry_run: bool = False) -> None:
     if triggered:
         logger.info(f"[MONITOR] {len(triggered)} stop(s) atingido(s) neste ciclo")
 
+    if not dry_run:
+        paper_stops = _check_paper_stops(current_prices, pipeline="cripto")
+        if paper_stops:
+            logger.info(f"[PAPER] {len(paper_stops)} stop(s) no paper trading cripto")
+
     print(f"\n{len(signals)} pares coletados.\n")
 
     # 2. Avaliação de cada sinal
@@ -171,6 +177,18 @@ def run_pipeline(dry_run: bool = False) -> None:
                     logger.error(f"[TELEGRAM] Falha ao enviar {result['symbol']}: {e}")
                 # Registra posição para trailing stop
                 open_position(signal["symbol"], signal["price"])
+                # Paper trading
+                try:
+                    _paper_buy(
+                        symbol=signal["symbol"],
+                        price=signal["price"],
+                        decision=result["decision"],
+                        ai_score=result.get("ai_score", 50),
+                        pipeline="cripto",
+                        reason=" | ".join(result.get("reasons", [])[:2]),
+                    )
+                except Exception as _e:
+                    logger.warning(f"[PAPER] Falha ao executar compra cripto: {_e}")
     else:
         print("\nNenhum sinal acionável neste ciclo.")
 

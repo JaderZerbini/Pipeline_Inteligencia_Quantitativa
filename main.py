@@ -12,6 +12,7 @@ from decision_engine import evaluate_signal
 from macro_monitor import fetch_macro_snapshot, evaluate_macro
 from monitor import check_stops
 from alerts import TelegramAlert, send_alert
+from paper_trading import execute_paper_buy as _paper_buy, check_paper_stops as _check_paper_stops
 
 os.makedirs("data", exist_ok=True)
 
@@ -184,6 +185,17 @@ def orquestrar_investimento() -> list[dict]:
                 f"🛡️ ANÁLISE IA:\n{summary}\n\n"
                 f"💡 Verifique seu app do Nubank!"
             )
+            try:
+                _paper_buy(
+                    symbol=ticker,
+                    price=float(row["Preço"]),
+                    decision=decision["recommendation"],
+                    ai_score=audit.get("score", 50),
+                    pipeline="b3",
+                    reason=" | ".join(decision.get("reasons", [])[:2]),
+                )
+            except Exception as _e:
+                logger.warning(f"[PAPER] Falha ao executar compra B3: {_e}")
 
     # Relatório no terminal
     print("\n" + "=" * 50)
@@ -196,6 +208,11 @@ def orquestrar_investimento() -> list[dict]:
 
     # PASSO 6: Verificar trailing stops para posições abertas
     logger.info("--- Verificando trailing stops ---")
+    try:
+        _paper_prices = {str(r["Ticker"]): float(r["Preço"]) for _, r in df_foguetes.iterrows()}
+        _check_paper_stops(_paper_prices, pipeline="b3")
+    except Exception as _e:
+        logger.warning(f"[PAPER] Falha ao verificar stops B3: {_e}")
     triggered = check_stops(messenger)
     if triggered:
         for t in triggered:
