@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from db import save_signal
 
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+logger = logging.getLogger(__name__)
 
 # Backtest-approved: win_rate >= 55% AND sharpe >= 0.5 across 2 years
 TICKERS_PRIORITARIOS = [
@@ -49,6 +50,73 @@ def get_brapi_top_tickers() -> list[str]:
     except Exception as e:
         print(f"[BRAPI WARN] {e}")
         return []
+
+
+def get_b3_historical_trend(ticker: str) -> dict | None:
+    """
+    Fetches daily candles from Yahoo Finance and calculates MA20, MA50, MA200
+    for B3 assets. Uses yfinance which is already installed.
+    """
+    try:
+        yf_ticker = ticker if ticker.endswith(".SA") else f"{ticker}.SA"
+        hist = yf.download(yf_ticker, period="1y", interval="1d",
+                           progress=False, auto_adjust=True)
+
+        if hist.empty or len(hist) < 50:
+            logger.warning(f"[TREND B3] {ticker}: dados insuficientes")
+            return None
+
+        # yfinance ≥0.2 may return MultiIndex columns: Close becomes a DataFrame
+        close_col = hist["Close"]
+        if isinstance(close_col, pd.DataFrame):
+            close_col = close_col.iloc[:, 0]
+        closes = [float(v) for v in close_col.dropna().tolist()]
+
+        current = closes[-1]
+        ma20  = sum(closes[-20:]) / 20
+        ma50  = sum(closes[-50:]) / 50
+        ma200 = sum(closes[-200:]) / 200 if len(closes) >= 200 else sum(closes) / len(closes)
+
+        pct_from_ma200 = (current - ma200) / ma200 * 100
+        trend = "uptrend" if ma20 > ma50 else ("downtrend" if ma20 < ma50 else "neutral")
+
+        if current < ma200 * 0.95:
+            position = "below_ma200"
+            hist_context = (
+                f"Preço {abs(pct_from_ma200):.1f}% abaixo da média de 200 dias "
+                f"— zona historicamente barata"
+            )
+        elif current > ma200 * 1.20:
+            position = "above_ma200"
+            hist_context = (
+                f"Preço {pct_from_ma200:.1f}% acima da média de 200 dias "
+                f"— zona historicamente cara"
+            )
+        else:
+            position = "at_ma200"
+            hist_context = (
+                f"Preço próximo à média de 200 dias "
+                f"({pct_from_ma200:+.1f}%) — zona de valor justo"
+            )
+
+        logger.info(
+            f"[TREND B3] {ticker}: MA200=R${ma200:.2f} | "
+            f"position={position} | pct={pct_from_ma200:+.1f}% | trend={trend}"
+        )
+
+        return {
+            "ma20":           round(float(ma20), 4),
+            "ma50":           round(float(ma50), 4),
+            "ma200":          round(float(ma200), 4),
+            "trend":          trend,
+            "position":       position,
+            "pct_from_ma200": round(float(pct_from_ma200), 2),
+            "hist_context":   hist_context,
+        }
+
+    except Exception as e:
+        logger.warning(f"[TREND B3] {ticker}: {e}")
+        return None
 
 
 def scanner_pro(tickers: list[str] | None = None) -> pd.DataFrame:
@@ -126,6 +194,7 @@ def scanner_pro(tickers: list[str] | None = None) -> pd.DataFrame:
 
         # Entry signal: price above EMA-20 AND RSI in momentum zone (not exhausted)
         if current_price > last_row["EMA_20"] and 55 < last_row["RSI"] < 68:
+            trend = get_b3_historical_trend(ticker)
             signal_id = save_signal(
                 timestamp=now,
                 ticker=ticker,
@@ -135,12 +204,16 @@ def scanner_pro(tickers: list[str] | None = None) -> pd.DataFrame:
                 signal_type="BUY",
             )
             oportunidades.append({
-                "Ticker":         ticker,
-                "signal_id":      signal_id,
-                "Preço":          current_price,
-                "RSI":            float(last_row["RSI"]),
-                "volume_ratio":   volume_ratio,
+                "Ticker":          ticker,
+                "signal_id":       signal_id,
+                "Preço":           current_price,
+                "RSI":             float(last_row["RSI"]),
+                "volume_ratio":    volume_ratio,
                 "Distancia_Media": ((current_price / last_row["EMA_20"]) - 1) * 100,
+                "hist_trend":      trend["trend"]          if trend else "unknown",
+                "hist_position":   trend["position"]       if trend else "unknown",
+                "pct_from_ma200":  trend["pct_from_ma200"] if trend else None,
+                "hist_context":    trend["hist_context"]   if trend else "Histórico indisponível",
             })
 
     return pd.DataFrame(oportunidades)

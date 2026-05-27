@@ -148,6 +148,28 @@ def evaluate_signal(signal: dict, audit: dict, macro: dict = None) -> dict:
         recommendation = "MODERADO"
         reasons.append("Macro desfavorável rebaixou sinal")
 
+    # Trend gate: block historically expensive entries and weak AI in downtrend
+    hist_position = signal.get("hist_position", "unknown")
+    hist_trend    = signal.get("hist_trend", "unknown")
+    pct_ma200     = signal.get("pct_from_ma200", 0) or 0
+
+    if hist_position == "above_ma200" and pct_ma200 > 30:
+        ticker_log = signal.get("ticker", "")
+        logger.info(f"[{ticker_log}] Bloqueado: {pct_ma200:.1f}% acima da MA200")
+        recommendation = "AGUARDAR"
+        reasons.append(
+            f"Preço {pct_ma200:.1f}% acima da média histórica — "
+            f"zona historicamente cara"
+        )
+
+    if hist_trend == "downtrend" and recommendation in ("FORTE", "MODERADO"):
+        if effective_score < 75:
+            recommendation = "AGUARDAR"
+            reasons.append(
+                "Tendência de baixa — confiança da IA insuficiente "
+                "para entrada contra a tendência"
+            )
+
     # Backtest gate: boost label for approved tickers, downgrade unvalidated MODERADO
     ticker_clean = signal.get("ticker", "").replace(".SA", "")
     if ticker_clean in BACKTEST_APPROVED and recommendation in ("FORTE", "MODERADO"):

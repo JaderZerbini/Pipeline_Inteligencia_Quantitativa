@@ -146,10 +146,14 @@ def orquestrar_investimento() -> list[dict]:
 
         # PASSO 4: Decisão com o audit real (ou fallback se timeout)
         signal_dict = {
-            "ticker": ticker,
-            "rsi": float(row["RSI"]),
-            "volume_ratio": float(row["volume_ratio"]),
-            "price": float(row["Preço"]),
+            "ticker":         ticker,
+            "rsi":            float(row["RSI"]),
+            "volume_ratio":   float(row["volume_ratio"]),
+            "price":          float(row["Preço"]),
+            "hist_trend":     row.get("hist_trend", "unknown") or "unknown",
+            "hist_position":  row.get("hist_position", "unknown") or "unknown",
+            "pct_from_ma200": float(row.get("pct_from_ma200") or 0),
+            "hist_context":   str(row.get("hist_context") or "Histórico indisponível"),
         }
         decision = evaluate_signal(signal_dict, audit, macro=macro_result)
         update_signal_recommendation(signal_id, decision["recommendation"])
@@ -160,14 +164,16 @@ def orquestrar_investimento() -> list[dict]:
         )
 
         decisoes_finais.append({
-            "Ativo": ticker,
-            "Preço": row["Preço"],
-            "RSI": row["RSI"],
-            "Recomendação": decision["recommendation"],
-            "Confiança": decision["confidence"],
-            "Razões": decision["reasons"],
-            "Análise IA": audit.get("reason", _FALLBACK_AUDIT["reason"]),
-            "signal_id": signal_id,
+            "Ativo":         ticker,
+            "Preço":         row["Preço"],
+            "RSI":           row["RSI"],
+            "Recomendação":  decision["recommendation"],
+            "Confiança":     decision["confidence"],
+            "Razões":        decision["reasons"],
+            "Análise IA":    audit.get("reason", _FALLBACK_AUDIT["reason"]),
+            "signal_id":     signal_id,
+            "hist_context":  signal_dict.get("hist_context", ""),
+            "hist_position": signal_dict.get("hist_position", "unknown"),
         })
 
         # PASSO 5: Alerta apenas para sinais acionáveis
@@ -179,10 +185,12 @@ def orquestrar_investimento() -> list[dict]:
             )
             if macro_result.get("warnings"):
                 summary += "\n⚠️ Contexto macro: " + " | ".join(macro_result["warnings"])
+            _hist_ctx = signal_dict.get("hist_context", "")
             send_alert(
                 f"🚀 *SINAL DE COMPRA: {ticker}*\n\n"
                 f"📈 RSI: {row['RSI']:.2f}\n"
-                f"🛡️ ANÁLISE IA:\n{summary}\n\n"
+                + (f"📊 Histórico: {_hist_ctx}\n" if _hist_ctx else "")
+                + f"🛡️ ANÁLISE IA:\n{summary}\n\n"
                 f"💡 Verifique seu app do Nubank!"
             )
             try:
