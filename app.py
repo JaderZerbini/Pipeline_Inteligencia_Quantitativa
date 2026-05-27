@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import sys
@@ -114,101 +114,124 @@ tab_scanner, tab_sinais, tab_ops, tab_bt, tab_validation, tab_cripto = st.tabs(
 with tab_scanner:
     st_autorefresh(interval=300_000, key="scanner_refresh")
 
-    with st.expander("📘 Como ler este painel:", expanded=False):
-        st.markdown("""
-- **RSI abaixo de 38:** ativo possivelmente subvalorizado
-- **Volume acima de 1.2x:** há interesse real no mercado
-- **Score IA acima de 70:** notícias verificadas como confiáveis
-- **Todos os critérios verdes = sinal válido para análise manual**
-        """)
-
     if "resultados" not in st.session_state:
         with st.spinner("Varrendo mercado e auditando com IA..."):
             st.session_state.resultados = orquestrar_investimento()
 
     resultados = st.session_state.resultados
 
+    # ── Summary bar — first thing the user reads ──────────────────────────────
+    if resultados:
+        _recs = [item["Recomendação"] for item in resultados]
+        if "FORTE" in _recs:
+            st.success("🟢 Há oportunidade agora — veja os ativos abaixo")
+        elif "MODERADO" in _recs:
+            st.warning("🟡 Sinais fracos detectados — observe com cautela")
+        else:
+            st.info("⚫ Nenhum sinal agora — o sistema está aguardando o momento certo")
+    else:
+        st.info("⚫ Nenhum sinal agora — o sistema está aguardando o momento certo")
+
+    _scan_brt = (datetime.now(timezone.utc) - timedelta(hours=3)).strftime("%H:%M")
+    st.caption(f"Última varredura: {_scan_brt} BRT — próxima em ~5 minutos (autorefresh ativo)")
+
+    # ── Asset cards ───────────────────────────────────────────────────────────
     if resultados:
         cols = st.columns(min(len(resultados), 4))
         for i, item in enumerate(resultados):
             with cols[i % len(cols)]:
                 rec        = item["Recomendação"]
-                confianca  = item.get("Confiança", 0)
+                rsi        = float(item["RSI"])
+                confianca  = float(item.get("Confiança", 0))
                 razoes     = item.get("Razões", [])
                 analise_ia = item.get("Análise IA", "")
+                ai_score   = int(confianca * 100)
+                _t         = item["Ativo"].replace(".SA", "")
 
-                # Ticker header
-                cor_map = {"FORTE": "green", "MODERADO": "orange",
-                           "AGUARDAR": "gray", "BLOQUEADO": "red"}
-                cor = cor_map.get(rec, "gray")
-                st.markdown(f"### :{cor}[{item['Ativo']}]")
-                _t = item["Ativo"].replace(".SA", "")
+                _curr        = get_signal_by_id(item.get("signal_id"))
+                volume_ratio = float((_curr.get("volume_ratio") or 0)) if _curr else 0.0
+
+                # ── Semaphore header ──────────────────────────────────────
+                _sem = {
+                    "FORTE":    ("🟢", "Oportunidade de compra",
+                                 "Sinal forte — todos os critérios atendidos"),
+                    "MODERADO": ("🟡", "Sinal fraco — observe",
+                                 "Critérios parcialmente atendidos"),
+                    "BLOQUEADO":("🔴", "Não entre — risco detectado",
+                                 "IA identificou ruído ou manipulação"),
+                }.get(rec, ("⚫", "Aguarde — sem sinal agora",
+                            "Condições de mercado neutras ou desfavoráveis"))
+                _emoji, _label, _subtitle = _sem
+
+                st.markdown(f"## {_emoji} {item['Ativo']}")
+                st.markdown(f"**{_label}**")
+                st.caption(_subtitle)
                 if _t in BACKTEST_APPROVED:
-                    st.caption(":green[✅ validado]")
-                else:
-                    st.caption(":gray[⚠️ sem histórico]")
+                    st.caption(":green[✅ validado pelo backtest]")
 
-                st.metric("Preço Atual",    f"R$ {item.get('Preço', 0):.2f}")
-                st.metric("RSI",            f"{item['RSI']:.2f}")
-                st.metric("Confiança IA",   f"{confianca:.0%}")
+                # ── Plain-language explanation ────────────────────────────
+                if rec == "AGUARDAR":
+                    _why = []
+                    if rsi > 40:
+                        _why.append(
+                            f"RSI em {rsi:.0f} — ativo não está sobrevendido "
+                            f"(precisaria estar abaixo de 30)"
+                        )
+                    if volume_ratio < 1.5:
+                        _why.append(
+                            f"Volume {volume_ratio:.1f}x abaixo do normal "
+                            f"(precisaria ser 1.5x ou mais)"
+                        )
+                    if ai_score < 65:
+                        _why.append(
+                            f"Confiança da IA em {ai_score}% — "
+                            f"análise de notícias inconclusiva"
+                        )
+                    if not _why:
+                        _why.append("Nem todos os critérios técnicos foram atendidos")
+                    st.info("Por que aguardar:\n" + "\n".join(f"• {r}" for r in _why))
 
-                # FIX 3: delta vs previous scan
-                _prev = get_previous_signal(item["Ativo"])
-                _curr = get_signal_by_id(item.get("signal_id"))
-                if _prev and _curr:
-                    _rsi_delta = (_curr.get("rsi") or 0) - (_prev.get("rsi") or 0)
-                    _vol_now   = _curr.get("volume_ratio") or 0
-                    _vol_delta = _vol_now - (_prev.get("volume_ratio") or 0)
-                    _prev_ts   = (_prev.get("created_at") or "")[:16]
-
-                    _rsi_arrow = f"↓ {abs(_rsi_delta):.1f}" if _rsi_delta < 0 else f"↑ {abs(_rsi_delta):.1f}"
-                    _rsi_color = "red" if _rsi_delta < 0 else "green"
-                    _vol_arrow = f"↑ {abs(_vol_delta):.2f}" if _vol_delta > 0 else f"↓ {abs(_vol_delta):.2f}"
-                    _vol_color = "green" if _vol_delta > 0 else "red"
-
-                    st.markdown(
-                        f"RSI **{_curr.get('rsi', 0):.2f}** :{_rsi_color}[{_rsi_arrow}]"
-                        f"&nbsp;&nbsp; Vol **{_vol_now:.2f}x** :{_vol_color}[{_vol_arrow}]"
-                    )
-                    st.caption(f"vs varredura anterior ({_prev_ts})")
-
-                    _rsi_falling = _rsi_delta < 0 and (_curr.get("rsi") or 100) < 45
-                    _vol_rising  = _vol_delta > 0 and _vol_now > 0.8
-                    if _rsi_falling and _vol_rising:
-                        st.warning("⚡ Sinal em desenvolvimento")
-                    elif _rsi_falling:
-                        st.warning("📉 RSI caindo — monitorar")
-                    elif _vol_rising:
-                        st.success("📈 Volume crescendo")
-
-                # FIX 1: recommendation box driven by decision_engine result
-                if rec == "FORTE":
+                elif rec == "FORTE":
                     st.success(
-                        "🟢 SINAL FORTE — Condições técnicas e informacionais favoráveis. "
-                        "RSI sobrevendido com volume e notícias verificadas."
+                        f"Por que comprar:\n"
+                        f"• RSI em {rsi:.0f} — ativo sobrevendido, possível recuperação\n"
+                        f"• Volume {volume_ratio:.1f}x acima do normal — interesse crescente\n"
+                        f"• Confiança da IA em {ai_score}% — notícias favoráveis\n"
+                        f"⚠️ Sugestão: até 20% do capital disponível"
                     )
+
                 elif rec == "MODERADO":
                     st.warning(
-                        "🟡 SINAL MODERADO — Condições parcialmente favoráveis. "
-                        "Analise com cautela."
-                    )
-                elif rec == "BLOQUEADO":
-                    st.error(
-                        "🔴 BLOQUEADO — Auditoria detectou possível manipulação. "
-                        "Não operar."
-                    )
-                else:
-                    st.info(
-                        "⏸ AGUARDAR — Condições insuficientes para entrada. "
-                        "RSI ou volume fora dos critérios."
+                        f"Sinal fraco — acompanhe:\n"
+                        f"• RSI em {rsi:.0f} — zona de atenção mas não confirmada\n"
+                        f"• Aguarde um segundo sinal antes de agir"
                     )
 
-                with st.expander("🛡️ Ver Relatório Frank"):
+                elif rec == "BLOQUEADO":
+                    _bloqueio = razoes[0] if razoes else "Manipulação detectada"
+                    st.error(
+                        f"Não entre agora:\n"
+                        f"• {_bloqueio}\n"
+                        f"• Aguarde o próximo ciclo de análise"
+                    )
+
+                # ── Technical details (collapsed by default) ──────────────
+                _macro = next(
+                    (r for r in razoes if "macro" in r.lower() or "⚠️" in r),
+                    "Sem alertas macro"
+                )
+                with st.expander("🔬 Detalhes técnicos", expanded=False):
+                    st.write(f"RSI: {rsi:.2f}")
+                    st.write(f"Volume ratio: {volume_ratio:.2f}x")
+                    st.write(f"Score IA: {ai_score}")
+                    st.write(f"Contexto macro: {_macro}")
+                    st.write(f"Preço: R$ {item.get('Preço', 0):.2f}")
+                    if analise_ia:
+                        st.caption(f"Análise IA: {analise_ia}")
                     if razoes:
+                        st.markdown("**Razões:**")
                         for r in razoes:
                             st.markdown(f"- {r}")
-                    if analise_ia:
-                        st.caption(analise_ia)
     else:
         st.info("Nenhuma oportunidade técnica encontrada no momento.")
 
@@ -485,7 +508,6 @@ with tab_validation:
 with tab_cripto:
     import subprocess
     import re
-    from datetime import timedelta, timezone
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -523,11 +545,25 @@ with tab_cripto:
         try:
             with get_connection() as conn:
                 return pd.read_sql(
-                    """SELECT symbol, decision, ai_score, price,
-                              rsi_1h, galaxy_score, sentiment, created_at
+                    """SELECT symbol, decision, ai_score, ai_veredicto, price,
+                              rsi_1h, galaxy_score, sentiment, reasons, created_at
                        FROM crypto_signals
                        ORDER BY created_at DESC
                        LIMIT 100""",
+                    conn,
+                )
+        except Exception:
+            return pd.DataFrame()
+
+    @st.cache_data(ttl=60)
+    def _load_crypto_price_history():
+        try:
+            with get_connection() as conn:
+                return pd.read_sql(
+                    """SELECT symbol, price, created_at
+                       FROM crypto_signals
+                       ORDER BY created_at DESC
+                       LIMIT 80""",
                     conn,
                 )
         except Exception:
@@ -572,17 +608,34 @@ with tab_cripto:
         if not df_run.empty:
             st.dataframe(
                 df_run.style.apply(_color_decision, subset=["Decisão"]),
-                use_container_width=True,
+                width='stretch',
             )
         with st.expander("📋 Log completo", expanded=False):
             st.code(raw, language=None)
         if clear_after:
             _load_crypto_stats.clear()
             _load_crypto_signals_tab.clear()
+            _load_crypto_price_history.clear()
 
     # ── Section 1: Status bar ─────────────────────────────────────────────────
 
     st.subheader("🪙 Pipeline Cripto")
+
+    with st.expander("ℹ️ Como interpretar os sinais", expanded=False):
+        st.markdown("""
+| Semáforo | Decisão | O que significa |
+|----------|---------|-----------------|
+| 🟢 | **FORTE** | Todos os critérios atendidos — RSI sobrevendido, momentum positivo, IA confiante |
+| 🟡 | **MODERADO** | Critérios parcialmente atendidos — acompanhe, mas não entre ainda |
+| ⚫ | **AGUARDAR** | Nenhum critério técnico atingido — mercado neutro ou desfavorável |
+| 🔴 | **BLOQUEADO** | IA detectou risco — possível pump, FUD coordenado ou manipulação |
+
+**Galaxy Score (0–100):** Momentum composto de preço, volume, liquidez e redes sociais.
+- Acima de 52 → interesse crescente
+- Abaixo de 40 → momentum fraco
+
+**RSI (1h):** Sobrecomprado acima de 65, sobrevendido abaixo de 35.
+        """)
 
     last_raw, today_count, actionable_7d = _load_crypto_stats()
     last_run_str = _to_brt(last_raw) if last_raw else "Nunca"
@@ -605,6 +658,20 @@ with tab_cripto:
 
     st.markdown("---")
 
+    # ── Summary bar ───────────────────────────────────────────────────────────
+
+    _df_summary = _load_crypto_signals_tab()
+    if not _df_summary.empty:
+        _recent_decisions = _df_summary.drop_duplicates("symbol", keep="first")["decision"].tolist()
+        _n_forte = _recent_decisions.count("FORTE")
+        _n_mod   = _recent_decisions.count("MODERADO")
+        if _n_forte:
+            st.success(f"🟢 {_n_forte} ativo(s) com sinal de compra agora")
+        elif _n_mod:
+            st.warning(f"🟡 {_n_mod} ativo(s) com sinal fraco — observe")
+        else:
+            st.info("⚫ Nenhum sinal acionável agora — aguardando o momento certo")
+
     # ── Section 2: Run buttons ────────────────────────────────────────────────
 
     btn_col1, btn_col2 = st.columns(2)
@@ -617,53 +684,115 @@ with tab_cripto:
 
     st.markdown("---")
 
-    # ── Section 3: Signals table ──────────────────────────────────────────────
+    # ── Section 3: Signal cards ───────────────────────────────────────────────
 
-    st.subheader("Sinais recentes")
+    st.subheader("Sinais por ativo")
     df_crypto = _load_crypto_signals_tab()
 
     if df_crypto.empty:
         st.info("Nenhum sinal ainda. Clique em '▶ Rodar agora' para executar o pipeline.")
     else:
-        disp = df_crypto.copy()
-        disp["created_at"] = disp["created_at"].apply(_to_brt)
-        disp["price"] = disp["price"].apply(
-            lambda x: f"{float(x):.2f}" if pd.notna(x) else "—"
-        )
-        disp["rsi_1h"] = disp["rsi_1h"].apply(
-            lambda x: f"{float(x):.1f}" if pd.notna(x) else "—"
-        )
-        disp["galaxy_score"] = disp["galaxy_score"].apply(
-            lambda x: str(int(float(x))) if pd.notna(x) else "—"
-        )
-        disp = disp.rename(columns={
-            "symbol":       "Par",
-            "decision":     "Decisão",
-            "ai_score":     "Score IA",
-            "price":        "Preço (USD)",
-            "rsi_1h":       "RSI (1h)",
-            "galaxy_score": "Galaxy",
-            "sentiment":    "Sentimento",
-            "created_at":   "Data/Hora",
-        })
-        st.dataframe(disp.style.apply(_color_decision, subset=["Decisão"]),
-                     use_container_width=True)
+        _card_rows = df_crypto.drop_duplicates("symbol", keep="first")
+        _card_cols = st.columns(min(len(_card_rows), 3))
+
+        for _ci, (_, _row) in enumerate(_card_rows.iterrows()):
+            with _card_cols[_ci % len(_card_cols)]:
+                _sym     = _row["symbol"]
+                _dec     = _row.get("decision", "AGUARDAR")
+                _rsi     = _row.get("rsi_1h")
+                _gal     = _row.get("galaxy_score")
+                _price   = _row.get("price")
+                _sent    = _row.get("sentiment", "")
+                _verdict = _row.get("ai_veredicto", "")
+                _ai_sc   = _row.get("ai_score")
+                _at      = _to_brt(_row.get("created_at", ""))
+
+                _sem_map = {
+                    "FORTE":    ("🟢", "Compra — todos os critérios atendidos",
+                                 "RSI sobrevendido + momentum + IA confiante"),
+                    "MODERADO": ("🟡", "Sinal fraco — acompanhe",
+                                 "Critérios parciais — aguarde confirmação"),
+                    "BLOQUEADO":("🔴", "Não entre — risco detectado",
+                                 "IA detectou pump, FUD ou manipulação"),
+                }.get(_dec, ("⚫", "Aguarde — sem sinal agora",
+                             "Nenhum critério técnico atingido"))
+                _emoji, _lbl, _sub = _sem_map
+
+                st.markdown(f"## {_emoji} {_sym}")
+                st.markdown(f"**{_lbl}**")
+                st.caption(f"{_sub} · {_at}")
+
+                _rsi_f = float(_rsi) if _rsi is not None and pd.notna(_rsi) else None
+                _gal_i = int(float(_gal)) if _gal is not None and pd.notna(_gal) else None
+                _ai_i  = int(float(_ai_sc)) if _ai_sc is not None and pd.notna(_ai_sc) else None
+
+                if _dec == "FORTE":
+                    _why = "Por que comprar:\n"
+                    if _rsi_f is not None:
+                        _why += f"• RSI em {_rsi_f:.0f} — sobrevendido, possível recuperação\n"
+                    if _gal_i is not None:
+                        _why += f"• Galaxy {_gal_i} — momentum crescente\n"
+                    if _ai_i is not None:
+                        _why += f"• IA {_ai_i}% confiante — notícias favoráveis\n"
+                    _why += "⚠️ Sugestão: até 10% do capital em crypto"
+                    st.success(_why)
+                elif _dec == "MODERADO":
+                    st.warning(
+                        "Sinal fraco — acompanhe:\n"
+                        "• Alguns critérios atendidos, mas sem confirmação total\n"
+                        "• Aguarde um segundo sinal antes de agir"
+                    )
+                elif _dec == "BLOQUEADO":
+                    _motivo = _verdict if _verdict else "Risco detectado pela IA"
+                    st.error(
+                        f"Não entre agora:\n"
+                        f"• {_motivo}\n"
+                        f"• Aguarde o próximo ciclo de análise"
+                    )
+                else:
+                    _aguard_why = []
+                    if _rsi_f is not None and _rsi_f > 35:
+                        _aguard_why.append(f"RSI em {_rsi_f:.0f} — sem sobrevendimento")
+                    if _gal_i is not None and _gal_i < 48:
+                        _aguard_why.append(f"Galaxy {_gal_i} — momentum fraco")
+                    if not _aguard_why:
+                        _aguard_why.append("Critérios técnicos não atingidos")
+                    st.info("Por que aguardar:\n" + "\n".join(f"• {r}" for r in _aguard_why))
+
+                with st.expander("🔬 Detalhes técnicos", expanded=False):
+                    if _price is not None and pd.notna(_price):
+                        st.write(f"Preço: $ {float(_price):.4f}")
+                    if _rsi_f is not None:
+                        st.write(f"RSI (1h): {_rsi_f:.1f}")
+                    if _gal_i is not None:
+                        st.write(f"Galaxy Score: {_gal_i}")
+                    if _ai_i is not None:
+                        st.write(f"Score IA: {_ai_i}")
+                    if _sent:
+                        st.write(f"Sentimento: {_sent}")
+                    if _verdict:
+                        st.caption(f"Veredicto IA: {_verdict}")
 
     if st.button("🔄 Atualizar", key="cripto_refresh"):
         _load_crypto_stats.clear()
         _load_crypto_signals_tab.clear()
+        _load_crypto_price_history.clear()
         st.rerun()
 
-    # ── Section 4: Mini chart ─────────────────────────────────────────────────
+    # ── Section 4: Price evolution chart ─────────────────────────────────────
 
-    if not df_crypto.empty and len(df_crypto) >= 5:
-        st.subheader("Score IA por execução (últimas 50)")
+    st.subheader("Evolução de preço por ativo")
+    df_prices = _load_crypto_price_history()
+
+    if df_prices.empty or len(df_prices) < 8:
+        st.info("Gráfico disponível após mais execuções do scheduler (mínimo 8 registros).")
+    else:
         try:
-            df_chart = df_crypto.head(50).copy()
-            df_chart["_brt"] = df_chart["created_at"].apply(_to_brt)
-            df_chart = df_chart.iloc[::-1]  # chronological order
-            df_pivot = df_chart.pivot_table(
-                index="_brt", columns="symbol", values="ai_score", aggfunc="mean"
+            df_prices = df_prices.copy()
+            df_prices["_brt"] = df_prices["created_at"].apply(_to_brt)
+            df_prices = df_prices.iloc[::-1]
+            df_pivot = df_prices.pivot_table(
+                index="_brt", columns="symbol", values="price", aggfunc="mean"
             )
             st.line_chart(df_pivot)
         except Exception:
