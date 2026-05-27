@@ -244,6 +244,88 @@ def get_coingecko_data(coin_id: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Binance — tendência histórica via velas diárias
+# ---------------------------------------------------------------------------
+
+def get_historical_trend(symbol: str) -> dict | None:
+    """
+    Fetches daily candles from Binance and calculates MA20, MA50, MA200.
+    Uses only free Binance public API — no key required.
+    """
+    try:
+        url = f"{BINANCE_BASE}/klines"
+        resp = _session.get(url, params={
+            "symbol": symbol,
+            "interval": "1d",
+            "limit": 200,
+        }, timeout=15)
+        resp.raise_for_status()
+        klines = resp.json()
+
+        if len(klines) < 50:
+            return None
+
+        closes = [float(k[4]) for k in klines]
+        current = closes[-1]
+
+        ma20  = sum(closes[-20:]) / 20
+        ma50  = sum(closes[-50:]) / 50
+        ma200 = sum(closes[-200:]) / 200 if len(closes) >= 200 else None
+
+        trend = "uptrend" if ma20 > ma50 else ("downtrend" if ma20 < ma50 else "neutral")
+
+        if ma200:
+            pct_from_ma200 = (current - ma200) / ma200 * 100
+            if current < ma200 * 0.95:
+                position = "below_ma200"
+            elif current > ma200 * 1.20:
+                position = "above_ma200"
+            else:
+                position = "at_ma200"
+        else:
+            pct_from_ma200 = None
+            position = "unknown"
+
+        if position == "below_ma200":
+            hist_context = (
+                f"Preço {abs(pct_from_ma200):.1f}% abaixo da média de 200 dias "
+                f"— zona historicamente barata"
+            )
+        elif position == "above_ma200":
+            hist_context = (
+                f"Preço {pct_from_ma200:.1f}% acima da média de 200 dias "
+                f"— zona historicamente cara"
+            )
+        else:
+            hist_context = (
+                f"Preço próximo à média de 200 dias "
+                f"({pct_from_ma200:+.1f}%) — zona de valor justo"
+                if pct_from_ma200 is not None
+                else "Histórico de 200 dias indisponível"
+            )
+
+        logger.info(
+            f"[TREND] {symbol}: MA200={round(ma200, 2) if ma200 else 'N/A'} | "
+            f"position={position} | pct={f'{pct_from_ma200:+.1f}%' if pct_from_ma200 else 'N/A'} | "
+            f"trend={trend}"
+        )
+
+        return {
+            "ma20":           round(ma20, 4),
+            "ma50":           round(ma50, 4),
+            "ma200":          round(ma200, 4) if ma200 else None,
+            "trend":          trend,
+            "position":       position,
+            "pct_from_ma200": round(pct_from_ma200, 2) if pct_from_ma200 is not None else None,
+            "hist_context":   hist_context,
+        }
+
+    except Exception as e:
+        logger.warning(f"[TREND] {symbol}: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Orquestrador do scanner
 # ---------------------------------------------------------------------------
 
@@ -271,6 +353,7 @@ def scan_crypto() -> list[dict]:
 
         coin_id = COINGECKO_MAP.get(symbol)
         social = get_coingecko_data(coin_id) if coin_id else None
+        trend = get_historical_trend(symbol)
 
         signal = {
             "symbol": symbol,
@@ -283,6 +366,13 @@ def scan_crypto() -> list[dict]:
             "social_volume_24h": social["social_volume_24h"] if social else None,
             "sentiment": social["sentiment"] if social else "unknown",
             "scan_ts": datetime.now(timezone.utc).isoformat(),
+            "ma20":           trend["ma20"]           if trend else None,
+            "ma50":           trend["ma50"]           if trend else None,
+            "ma200":          trend["ma200"]          if trend else None,
+            "hist_trend":     trend["trend"]          if trend else "unknown",
+            "hist_position":  trend["position"]       if trend else "unknown",
+            "pct_from_ma200": trend["pct_from_ma200"] if trend else None,
+            "hist_context":   trend["hist_context"]   if trend else "Histórico indisponível",
         }
 
         logger.info(
@@ -292,8 +382,8 @@ def scan_crypto() -> list[dict]:
 
         signals.append(signal)
 
-        # Pausa entre requisições para respeitar rate limit do CoinGecko
-        time.sleep(3.0)
+        # Pausa entre requisições para respeitar rate limit (CoinGecko + Binance klines)
+        time.sleep(4.0)
 
     return signals
 

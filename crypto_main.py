@@ -34,7 +34,11 @@ from crypto_monitor import check_stops, open_position
 # Módulos existentes do Terminal Quant (não modificados)
 from alerts import send_alert
 from db import get_connection, init_db
-from paper_trading import execute_paper_buy as _paper_buy, check_paper_stops as _check_paper_stops
+from paper_trading import (
+    execute_paper_buy as _paper_buy,
+    check_paper_stops as _check_paper_stops,
+    check_ai_exits as _check_ai_exits,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -71,8 +75,9 @@ def _save_crypto_signal(result: dict, signal: dict) -> None:
                 INSERT INTO crypto_signals
                     (symbol, decision, ai_score, ai_veredicto, price,
                      rsi_1h, galaxy_score, change_pct_24h, sentiment,
-                     reasons, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     reasons, created_at,
+                     hist_trend, hist_position, pct_from_ma200)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     result["symbol"],
@@ -86,6 +91,9 @@ def _save_crypto_signal(result: dict, signal: dict) -> None:
                     signal.get("sentiment"),
                     json.dumps(result["reasons"], ensure_ascii=False),
                     result["evaluated_at"],
+                    signal.get("hist_trend"),
+                    signal.get("hist_position"),
+                    signal.get("pct_from_ma200"),
                 ),
             )
             conn.commit()
@@ -129,6 +137,11 @@ def run_pipeline(dry_run: bool = False) -> None:
         paper_stops = _check_paper_stops(current_prices, pipeline="cripto")
         if paper_stops:
             logger.info(f"[PAPER] {len(paper_stops)} stop(s) no paper trading cripto")
+
+    # AI-driven exits — avalia posições abertas contra sinais atuais
+    ai_exits = _check_ai_exits(signals, pipeline="cripto", dry_run=dry_run)
+    if ai_exits:
+        logger.info(f"[PAPER] {len(ai_exits)} saída(s) por IA neste ciclo")
 
     print(f"\n{len(signals)} pares coletados.\n")
 

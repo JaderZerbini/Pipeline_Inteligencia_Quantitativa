@@ -142,6 +142,26 @@ def evaluate_signal(signal: dict, call_ai: bool = True) -> dict:
         return _make_result(symbol, "AGUARDAR", ai_score, ai_veredicto,
                             [f"Sentimento negativo (galaxy={galaxy}) — não é momento de entrada"])
 
+    # --- Passo 1b: Filtro de tendência histórica ---
+
+    hist_position = signal.get("hist_position", "unknown")
+    hist_trend    = signal.get("hist_trend", "unknown")
+    pct_ma200     = signal.get("pct_from_ma200") or 0
+
+    # Bloqueia entrada se preço está >30% acima da MA200 (topo de ciclo)
+    if hist_position == "above_ma200" and pct_ma200 > 30:
+        reasons.append(
+            f"Preço {pct_ma200:.1f}% acima da MA200 "
+            f"— zona historicamente cara, risco elevado"
+        )
+        return _make_result(symbol, "AGUARDAR", ai_score, ai_veredicto, reasons)
+
+    # Em downtrend, exige confirmação mais forte da IA
+    ai_score_min_override = None
+    if hist_trend == "downtrend":
+        ai_score_min_override = STRONG_AI_SCORE_MIN + 10
+        reasons.append("Tendência de baixa — exigindo maior confiança da IA")
+
     # --- Passo 2: Consenso das IAs (só se indicadores básicos estão ok) ---
 
     if call_ai:
@@ -163,7 +183,8 @@ def evaluate_signal(signal: dict, call_ai: bool = True) -> dict:
     galaxy_ok_moderate = galaxy is not None and galaxy >= MODERATE_GALAXY_MIN
 
     # Quando IA não é chamada (backtesting/dry-run), o gate de score não bloqueia
-    ai_ok_forte = not call_ai or ai_score >= STRONG_AI_SCORE_MIN
+    _forte_threshold = ai_score_min_override if ai_score_min_override else STRONG_AI_SCORE_MIN
+    ai_ok_forte   = not call_ai or ai_score >= _forte_threshold
     ai_ok_moderate = not call_ai or ai_score >= MODERATE_AI_SCORE_MIN
 
     # FORTE: todos os critérios máximos
@@ -246,6 +267,7 @@ def format_telegram_message(signal: dict, result: dict) -> str:
         f"📊 RSI(1h): {signal.get('rsi_1h', 'N/A')}",
         f"🌕 Galaxy Score: {signal.get('galaxy_score', 'N/A')}",
         f"🤖 IA Score: {result['ai_score']} | {result['ai_veredicto']}",
+        f"📈 Histórico: {signal.get('hist_context', 'N/A')}",
         "",
         *[f"• {r}" for r in result["reasons"][:3]],
     ]

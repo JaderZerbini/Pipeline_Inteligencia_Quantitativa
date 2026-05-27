@@ -316,6 +316,144 @@ def get_portfolio_summary(pipeline: str) -> dict:
     }
 
 
+def evaluate_exit(
+    position: dict,
+    current_signal: dict,
+    pipeline: str,
+    dry_run: bool = False,
+) -> dict:
+    """
+    Asks the AI whether an open paper position should be closed.
+    Returns {"should_exit": bool, "reason": str, "confidence": int}.
+    """
+    from sentiment_analyzer import analyze_crypto
+
+    symbol        = position["symbol"]
+    entry_price   = position["entry_price"]
+    current_price = current_signal.get("price", 0)
+    pnl_pct       = ((current_price - entry_price) / entry_price * 100
+                     if entry_price > 0 else 0)
+    rsi           = current_signal.get("rsi_1h")
+    galaxy        = current_signal.get("galaxy_score")
+    hist_context  = current_signal.get("hist_context", "N/A")
+    hist_trend    = current_signal.get("hist_trend", "unknown")
+    stop_price    = position.get("stop_price", 0)
+
+    # Prompt uses the standard schema that _parse_gemini_json expects
+    # (score + verdict + reason + flags), PLUS should_exit as extra field
+    prompt = (
+        f"Analise se devo SAIR desta posição de cripto.\n\n"
+        f"Ativo: {symbol}\n"
+        f"Preço de entrada: ${entry_price:,.2f}\n"
+        f"Preço atual: ${current_price:,.2f}\n"
+        f"P&L atual: {pnl_pct:+.2f}%\n"
+        f"RSI(1h) atual: {rsi}\n"
+        f"Galaxy Score atual: {galaxy}\n"
+        f"Contexto histórico: {hist_context}\n"
+        f"Tendência: {hist_trend}\n"
+        f"Stop automático em: ${stop_price:,.2f}\n\n"
+        f"Avalie: RSI sobrecomprado? Momentum revertido? P&L justifica saída? Reversão brusca?\n\n"
+        'Responda SOMENTE com JSON: '
+        '{"score": 0-100, "verdict": "SAIR|MANTER", "reason": "uma frase em português", '
+        '"flags": [], "should_exit": true/false}\n'
+        '- score = confiança (0=incerto, 100=muito confiante)\n'
+        '- verdict = "SAIR" se sugere fechar, "MANTER" se não\n'
+        '- should_exit = true se verdict é SAIR'
+    )
+
+    try:
+        result = analyze_crypto(prompt)
+        if not result:
+            return {"should_exit": False, "reason": "IA indisponível", "confidence": 0}
+
+        # should_exit from explicit field, or inferred from verdict
+        should_exit = result.get("should_exit", result.get("verdict") == "SAIR")
+        confidence  = result.get("score", 50)
+        reason      = result.get("reason", "")
+
+        # Only exit if AI is confident (>= 70) to avoid premature exits on noise
+        if should_exit and confidence >= 70:
+            logger.info(
+                f"[PAPER EXIT] {symbol}: IA sugere saída "
+                f"(confiança={confidence}, P&L={pnl_pct:+.2f}%, razão={reason})"
+            )
+            return {"should_exit": True, "reason": f"IA: {reason}", "confidence": confidence}
+        else:
+            return {
+                "should_exit": False,
+                "reason": f"IA não sugere saída (confiança={confidence})",
+                "confidence": confidence,
+            }
+
+    except Exception as e:
+        logger.warning(f"[PAPER EXIT] {symbol}: erro na avaliação — {e}")
+        return {"should_exit": False, "reason": f"Erro: {e}", "confidence": 0}
+
+
+def check_ai_exits(
+    signals: list[dict],
+    pipeline: str,
+    dry_run: bool = False,
+) -> list[dict]:
+    """
+    For each open position, evaluates AI exit recommendation.
+    Called after check_paper_stops() in the scheduler cycle.
+    Returns list of positions where AI recommended and executed exit.
+    """
+    portfolio = get_portfolio(pipeline)
+    positions = get_open_positions(portfolio["id"])
+
+    if not positions:
+        return []
+
+    signal_map = {s["symbol"]: s for s in signals}
+    exited = []
+
+    for pos in positions:
+        symbol  = pos["symbol"]
+        current = signal_map.get(symbol)
+        if not current:
+            continue
+
+        eval_result = evaluate_exit(pos, current, pipeline, dry_run)
+
+        if eval_result["should_exit"]:
+            if not dry_run:
+                sell_result = execute_paper_sell(
+                    pos["id"],
+                    current["price"],
+                    eval_result["reason"],
+                    pipeline,
+                )
+                if sell_result:
+                    from alerts import send_alert
+                    pnl     = sell_result.get("pnl", 0)
+                    pnl_pct = sell_result.get("pnl_pct", 0)
+                    icon    = "📈" if pnl >= 0 else "📉"
+                    send_alert(
+                        f"{icon} *{symbol}* — SAÍDA POR IA (paper)\n"
+                        f"💲 Entrada: ${pos['entry_price']:,.2f}\n"
+                        f"💲 Saída: ${current['price']:,.2f}\n"
+                        f"{'✅' if pnl >= 0 else '❌'} P&L: "
+                        f"R$ {pnl:+.2f} ({pnl_pct:+.2f}%)\n"
+                        f"🤖 Motivo: {eval_result['reason']}\n"
+                        f"📊 {current.get('hist_context', '')}"
+                    )
+                    exited.append({"symbol": symbol, **sell_result})
+            else:
+                logger.info(
+                    f"[PAPER EXIT DRY] {symbol}: saída sugerida — "
+                    f"{eval_result['reason']}"
+                )
+                exited.append({
+                    "symbol": symbol,
+                    "dry_run": True,
+                    "reason": eval_result["reason"],
+                })
+
+    return exited
+
+
 def reset_portfolio(pipeline: str) -> None:
     """Closes all open positions and resets capital to R$5,000."""
     portfolio = get_portfolio(pipeline)

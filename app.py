@@ -168,6 +168,9 @@ with tab_scanner:
                 st.caption(_subtitle)
                 if _t in BACKTEST_APPROVED:
                     st.caption(":green[✅ validado pelo backtest]")
+                _hist_ctx = item.get("hist_context")
+                if _hist_ctx:
+                    st.caption(f"📈 {_hist_ctx}")
 
                 # ── Plain-language explanation ────────────────────────────
                 if rec == "AGUARDAR":
@@ -192,20 +195,28 @@ with tab_scanner:
                     st.info("Por que aguardar:\n" + "\n".join(f"• {r}" for r in _why))
 
                 elif rec == "FORTE":
-                    st.success(
+                    _hist_cheap = item.get("hist_position") == "below_ma200"
+                    _forte_msg = (
                         f"Por que comprar:\n"
                         f"• RSI em {rsi:.0f} — ativo sobrevendido, possível recuperação\n"
                         f"• Volume {volume_ratio:.1f}x acima do normal — interesse crescente\n"
                         f"• Confiança da IA em {ai_score}% — notícias favoráveis\n"
-                        f"⚠️ Sugestão: até 20% do capital disponível"
                     )
+                    if _hist_cheap:
+                        _forte_msg += "• Preço abaixo da média histórica — zona de compra favorável\n"
+                    _forte_msg += "⚠️ Sugestão: até 20% do capital disponível"
+                    st.success(_forte_msg)
 
                 elif rec == "MODERADO":
-                    st.warning(
+                    _hist_expensive = item.get("hist_position") == "above_ma200"
+                    _mod_msg = (
                         f"Sinal fraco — acompanhe:\n"
                         f"• RSI em {rsi:.0f} — zona de atenção mas não confirmada\n"
                         f"• Aguarde um segundo sinal antes de agir"
                     )
+                    if _hist_expensive:
+                        _mod_msg += "\n⚠️ Atenção: preço historicamente caro — sinal de menor qualidade"
+                    st.warning(_mod_msg)
 
                 elif rec == "BLOQUEADO":
                     _bloqueio = razoes[0] if razoes else "Manipulação detectada"
@@ -834,24 +845,72 @@ with tab_paper:
         except Exception:
             return pd.DataFrame()
 
+    @st.cache_data(ttl=60)
+    def _count_ai_exits(portfolio_id: int) -> int:
+        try:
+            with get_connection() as conn:
+                return conn.execute(
+                    "SELECT COUNT(*) FROM paper_trades "
+                    "WHERE portfolio_id = ? AND side = 'SELL' AND reason LIKE 'IA:%'",
+                    (portfolio_id,),
+                ).fetchone()[0]
+        except Exception:
+            return 0
+
+    @st.cache_data(ttl=60)
+    def _get_hist_contexts(symbols: tuple) -> dict:
+        if not symbols:
+            return {}
+        try:
+            with get_connection() as conn:
+                placeholders = ",".join("?" * len(symbols))
+                rows = conn.execute(
+                    f"SELECT cs.symbol, cs.hist_position, cs.pct_from_ma200 "
+                    f"FROM crypto_signals cs "
+                    f"INNER JOIN ( "
+                    f"    SELECT symbol, MAX(created_at) as max_ts "
+                    f"    FROM crypto_signals WHERE symbol IN ({placeholders}) GROUP BY symbol "
+                    f") latest ON cs.symbol = latest.symbol AND cs.created_at = latest.max_ts "
+                    f"WHERE cs.hist_position IS NOT NULL",
+                    list(symbols),
+                ).fetchall()
+            result = {}
+            for sym, pos, pct in rows:
+                if pos == "below_ma200" and pct is not None:
+                    result[sym] = f"{abs(pct):.1f}% abaixo MA200"
+                elif pos == "above_ma200" and pct is not None:
+                    result[sym] = f"{pct:.1f}% acima MA200"
+                elif pct is not None:
+                    result[sym] = f"MA200 {pct:+.1f}%"
+            return result
+        except Exception:
+            return {}
+
     st.subheader("📊 Paper Trading — Simulador R$5.000")
     st.caption("Compras fictícias automáticas em sinais FORTE/MODERADO · Trailing stop 7%")
 
     if st.button("🔄 Atualizar", key="paper_refresh"):
         _load_paper_summary.clear()
         _load_paper_trades.clear()
+        _count_ai_exits.clear()
+        _get_hist_contexts.clear()
         st.rerun()
+
+    # Portfolios computed upfront — used in both Section A and B
+    _b3_port     = get_portfolio("b3")
+    _cripto_port = get_portfolio("cripto")
 
     # ── Section A: Portfolio cards ────────────────────────────────────────────
 
     col_b3, col_cripto = st.columns(2)
 
-    for _col, _pipeline, _label in [
-        (col_b3, "b3", "B3"),
-        (col_cripto, "cripto", "Cripto"),
+    for _col, _pipeline, _label, _port in [
+        (col_b3, "b3", "B3", _b3_port),
+        (col_cripto, "cripto", "Cripto", _cripto_port),
     ]:
         with _col:
             _s = _load_paper_summary(_pipeline)
+            _ai_exits_count = _count_ai_exits(_port["id"])
             st.markdown(f"### {_label}")
             st.metric(
                 "Capital atual",
@@ -864,6 +923,7 @@ with tab_paper:
             _m3, _m4 = st.columns(2)
             _m3.metric("Win rate", f"{_s['win_rate']}%")
             _m4.metric("Op. fechadas", _s["closed_trades"])
+            st.metric("Saídas por IA", _ai_exits_count)
 
     st.markdown("---")
 
@@ -871,14 +931,20 @@ with tab_paper:
 
     st.subheader("Posições abertas")
 
-    _b3_port = get_portfolio("b3")
-    _cripto_port = get_portfolio("cripto")
+    _raw_b3_pos     = get_open_positions(_b3_port["id"])
+    _raw_cripto_pos = get_open_positions(_cripto_port["id"])
     _all_pos = (
-        [{"Pipeline": "B3", **p} for p in get_open_positions(_b3_port["id"])]
-        + [{"Pipeline": "Cripto", **p} for p in get_open_positions(_cripto_port["id"])]
+        [{"Pipeline": "B3", **p} for p in _raw_b3_pos]
+        + [{"Pipeline": "Cripto", **p} for p in _raw_cripto_pos]
     )
 
     if _all_pos:
+        # Lookup hist_context from latest crypto_signals for each symbol
+        _all_symbols = tuple({p["symbol"] for p in _all_pos})
+        _hist_ctx_map = _get_hist_contexts(_all_symbols)
+        for _p in _all_pos:
+            _p["Contexto"] = _hist_ctx_map.get(_p["symbol"], "—")
+
         _df_pos = pd.DataFrame(_all_pos)
         _df_pos = _df_pos.rename(columns={
             "symbol":        "Ativo",
@@ -888,7 +954,7 @@ with tab_paper:
             "pnl":           "P&L R$",
             "pnl_pct":       "P&L %",
         })
-        _keep = ["Pipeline", "Ativo", "Entrada", "Atual", "Stop", "P&L R$", "P&L %"]
+        _keep = ["Pipeline", "Ativo", "Entrada", "Atual", "Stop", "P&L R$", "P&L %", "Contexto"]
         _keep = [c for c in _keep if c in _df_pos.columns]
 
         def _color_pnl_pct(series: pd.Series) -> list[str]:
@@ -963,6 +1029,8 @@ with tab_paper:
                 reset_portfolio("b3")
                 _load_paper_summary.clear()
                 _load_paper_trades.clear()
+                _count_ai_exits.clear()
+                _get_hist_contexts.clear()
                 st.session_state["confirm_reset_b3"] = False
                 st.success("Portfólio B3 resetado.")
                 st.rerun()
@@ -980,6 +1048,8 @@ with tab_paper:
                 reset_portfolio("cripto")
                 _load_paper_summary.clear()
                 _load_paper_trades.clear()
+                _count_ai_exits.clear()
+                _get_hist_contexts.clear()
                 st.session_state["confirm_reset_cripto"] = False
                 st.success("Portfólio Cripto resetado.")
                 st.rerun()
