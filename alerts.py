@@ -45,22 +45,22 @@ def _get_bot() -> tuple[Bot | None, str | None]:
 # ---------------------------------------------------------------------------
 
 def send_alert(message: str) -> bool:
-    """Send a Markdown message via Telegram. Returns True on success.
-
-    Safe to call from Streamlit (event loop already running) or plain scripts.
-    Reuses the same Bot instance across calls to avoid redundant HTTP setup.
-    """
+    """Send a Markdown message via Telegram. Returns True on success."""
     bot, chat_id = _get_bot()
     if bot is None:
         return False
 
-    coro = bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown")
+    chat_ids = [cid.strip() for cid in chat_id.split(",") if cid.strip()]
+
+    async def _send_all():
+        for cid in chat_ids:
+            await bot.send_message(chat_id=cid, text=message, parse_mode="Markdown")
 
     try:
         asyncio.get_running_loop()
-        # Inside Streamlit or another async context — dispatch to a new thread
+        # Dentro do Streamlit — despacha para thread separada
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, coro)
+            future = pool.submit(asyncio.run, _send_all())
             try:
                 future.result(timeout=30)
                 return True
@@ -68,9 +68,9 @@ def send_alert(message: str) -> bool:
                 logger.error(f"[TELEGRAM] Falha (thread): {e}")
                 return False
     except RuntimeError:
-        # No running loop — call directly
+        # Sem loop rodando — chama direto
         try:
-            asyncio.run(coro)
+            asyncio.run(_send_all())
             return True
         except TelegramError as e:
             logger.error(f"[TELEGRAM] Falha ao enviar: {e}")
