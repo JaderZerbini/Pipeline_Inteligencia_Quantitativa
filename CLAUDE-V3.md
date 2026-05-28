@@ -113,8 +113,11 @@ fs.writeFileSync('C:\\project-manager\\project-tracker.json', JSON.stringify(t, 
 - **Stack**: Python/Flask, Node.js, React, TypeScript, MySQL, Prisma
 - **Infra**: Railway (vis-agro), pnpm workspaces (ERP), GitHub Gist (WorkBase sync)
 - **WorkBase**: `C:\project-manager\workbase.html` — painel standalone local
-- **Pipeline Quant stack**: Python 3.10+, yfinance, pandas_ta, Streamlit, SQLite (stdlib), OpenRouter (3 LLMs em consenso), Gemini API (fallback direto), Telegram Bot, feedparser (RSS)
-- **Pipeline Quant arquivos-chave**: `scanner_pro.py` (RSI+EMA), `sentiment_analyzer.py` (consenso ponderado), `decision_engine.py` (regras determinísticas), `macro_monitor.py` (Brent/SELIC/USD), `db.py` (persistência), `validator.py` (diagnóstico/calibração), `app.py` (dashboard 5 abas)
+- **Pipeline Quant stack**: Python 3.10+, yfinance, pandas_ta, Streamlit, SQLite (stdlib), OpenRouter (3 LLMs em consenso), Gemini API (fallback direto), Telegram Bot, feedparser (RSS), CoinGecko API (cripto)
+- **Pipeline Quant arquivos-chave B3**: `scanner_pro.py` (RSI+MA200 histórica), `sentiment_analyzer.py` (consenso ponderado), `decision_engine.py` (regras + gate MA200), `macro_monitor.py` (Brent/SELIC/USD), `db.py` (persistência), `validator.py` (diagnóstico/calibração), `monitor.py` (trailing stop), `app.py` (dashboard 7 abas)
+- **Pipeline Quant arquivos-chave Cripto**: `crypto_scanner.py` (RSI+MA200 Binance klines), `crypto_decision.py` (regras + gate MA200), `crypto_main.py` (orquestrador), `crypto_monitor.py` (monitor stops), `crypto_scheduler.py` (agendamento 6h)
+- **Paper Trading**: `paper_trading.py` (engine completa — buy/sell/stops/IA exit) — capital simulado R$5k, integrado a B3 e cripto; aba dedicada no dashboard
+- **Autostart Windows**: `setup_autostart.ps1` / `remove_autostart.ps1` / `check_autostart.ps1` — registra scheduler e dashboard no Task Scheduler; opções 5 e 6 no `iniciar_pipeline.bat`
 
 ---
 
