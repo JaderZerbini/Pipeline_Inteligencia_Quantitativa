@@ -38,17 +38,26 @@ def _deep_dict(obj) -> dict:
 
 
 def _load_auth() -> dict | None:
-    """Load credentials from local secrets.toml (primary) or st.secrets (Railway)."""
-    # Primary: read file directly — works locally and on Railway when secrets.toml is present
+    """Load credentials: local file → STREAMLIT_SECRETS env var → st.secrets."""
+    import toml
+
+    # 1. Local development: read .streamlit/secrets.toml directly
     secrets_path = Path(__file__).parent / ".streamlit" / "secrets.toml"
     if secrets_path.exists():
         try:
-            import toml
             return toml.load(str(secrets_path))
         except Exception:
             pass
 
-    # Fallback: st.secrets populated via STREAMLIT_SECRETS env var on Railway
+    # 2. Railway: paste TOML content as STREAMLIT_SECRETS env var in Railway Variables
+    raw = os.getenv("STREAMLIT_SECRETS")
+    if raw:
+        try:
+            return toml.loads(raw)
+        except Exception:
+            pass
+
+    # 3. Streamlit Cloud or other platforms with native secrets support
     try:
         if "credentials" in st.secrets and "cookie" in st.secrets:
             return {
