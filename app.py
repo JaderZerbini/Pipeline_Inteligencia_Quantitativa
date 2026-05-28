@@ -389,60 +389,169 @@ with tab_ops:
 # ── Tab 4: Backtesting ────────────────────────────────────────────────────
 
 with tab_bt:
-    results_path = Path("data/backtest_results.json")
+    _subtab_b3, _subtab_cripto = st.tabs(["📊 B3", "🪙 Cripto"])
 
-    if results_path.exists():
-        with open(results_path, encoding="utf-8") as fh:
-            bt_payload = json.load(fh)
-        results = bt_payload.get("results", [])
+    with _subtab_b3:
+        results_path = Path("data/backtest_results.json")
 
-        if results:
-            df_bt     = pd.DataFrame(results)
-            avg_wr    = df_bt["win_rate"].mean()
-            best_row  = df_bt.loc[df_bt["win_rate"].idxmax()]
-            worst_row = df_bt.loc[df_bt["win_rate"].idxmin()]
+        if results_path.exists():
+            with open(results_path, encoding="utf-8") as fh:
+                bt_payload = json.load(fh)
+            results = bt_payload.get("results", [])
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Win Rate Médio", f"{avg_wr:.1f}%")
-            c2.metric("Melhor Ticker",  best_row["ticker"])
-            c3.metric("Pior Ticker",    worst_row["ticker"])
+            if results:
+                df_bt     = pd.DataFrame(results)
+                avg_wr    = df_bt["win_rate"].mean()
+                best_row  = df_bt.loc[df_bt["win_rate"].idxmax()]
+                worst_row = df_bt.loc[df_bt["win_rate"].idxmin()]
 
-            st.subheader("Win Rate por Ticker")
-            st.bar_chart(df_bt.set_index("ticker")["win_rate"])
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Win Rate Médio", f"{avg_wr:.1f}%")
+                c2.metric("Melhor Ticker",  best_row["ticker"])
+                c3.metric("Pior Ticker",    worst_row["ticker"])
 
-            _BT_RENAME = {
-                "ticker":          "Ativo",
-                "total_trades":    "Operações",
-                "win_rate":        "Win Rate (%)",
-                "avg_return_pct":  "Retorno Médio (%)",
-                "max_drawdown_pct":"Drawdown Máx (%)",
-                "sharpe_ratio":    "Sharpe",
-                "period_days":     "Período (dias)",
-            }
-            df_bt_display = df_bt.rename(columns={k: v for k, v in _BT_RENAME.items() if k in df_bt.columns})
-            st.subheader("Métricas completas")
-            st.dataframe(df_bt_display, width='stretch')
+                st.subheader("Win Rate por Ticker")
+                st.bar_chart(df_bt.set_index("ticker")["win_rate"])
 
-            st.markdown("### Classificação por estratégia RSI")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.success("**✅ Operar**\n\nSBSP3 · VALE3 · ITUB4")
-            with col2:
-                st.warning("**⚠️ Cautela**\n\nPETR4 · B3SA3 · BBDC4 · VBBR3 · GGBR4")
-            with col3:
-                st.error("**❌ Evitar (RSI não funciona)**\n\nCSAN3 · RENT3 · WEGE3 · SUZB3 · PRIO3")
-            st.caption("Critérios: ≥5 trades históricos, win rate ≥55%, Sharpe ≥0.5")
+                _BT_RENAME = {
+                    "ticker":          "Ativo",
+                    "total_trades":    "Operações",
+                    "win_rate":        "Win Rate (%)",
+                    "avg_return_pct":  "Retorno Médio (%)",
+                    "max_drawdown_pct":"Drawdown Máx (%)",
+                    "sharpe_ratio":    "Sharpe",
+                    "period_days":     "Período (dias)",
+                }
+                df_bt_display = df_bt.rename(columns={k: v for k, v in _BT_RENAME.items() if k in df_bt.columns})
+                st.subheader("Métricas completas")
+                st.dataframe(df_bt_display, width='stretch')
+
+                st.markdown("### Classificação por estratégia RSI")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.success("**✅ Operar**\n\nSBSP3 · VALE3 · ITUB4")
+                with col2:
+                    st.warning("**⚠️ Cautela**\n\nPETR4 · B3SA3 · BBDC4 · VBBR3 · GGBR4")
+                with col3:
+                    st.error("**❌ Evitar (RSI não funciona)**\n\nCSAN3 · RENT3 · WEGE3 · SUZB3 · PRIO3")
+                st.caption("Critérios: ≥5 trades históricos, win rate ≥55%, Sharpe ≥0.5")
+            else:
+                st.info("Arquivo de backtest está vazio.")
         else:
-            st.info("Arquivo de backtest está vazio.")
-    else:
-        st.info("Nenhum backtest rodado ainda.")
+            st.info("Nenhum backtest rodado ainda.")
 
-    if st.button("▶ Rodar Backtest Agora"):
-        with st.spinner("Rodando backtest..."):
-            from backtester import run_full_backtest
-            bt_results = run_full_backtest()
-            st.success(f"Backtest concluído — {len(bt_results)} ativos analisados")
-            st.rerun()
+        if st.button("▶ Rodar Backtest Agora"):
+            with st.spinner("Rodando backtest..."):
+                from backtester import run_full_backtest
+                bt_results = run_full_backtest()
+                st.success(f"Backtest concluído — {len(bt_results)} ativos analisados")
+                st.rerun()
+
+    with _subtab_cripto:
+        import subprocess
+
+        st.subheader("Backtest Cripto — dados históricos Binance")
+        st.caption(
+            "Simula os sinais RSI + MA200 + momentum que o sistema teria gerado "
+            "no período e calcula se a estratégia seria lucrativa."
+        )
+
+        _bt_days = st.slider("Período (dias)", min_value=30, max_value=150, value=150, step=30)
+
+        if st.button("▶ Rodar backtest cripto"):
+            with st.spinner(f"Baixando dados históricos da Binance ({_bt_days} dias)..."):
+                proc = subprocess.run(
+                    [sys.executable, "crypto_backtester.py", "--days", str(_bt_days)],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+            raw = proc.stdout + (proc.stderr or "")
+            st.session_state["crypto_bt_raw"] = raw
+            st.session_state["crypto_bt_days"] = _bt_days
+
+        raw_bt = st.session_state.get("crypto_bt_raw", "")
+
+        if raw_bt:
+            # Parse summary table from output
+            _bt_rows = []
+            current: dict = {}
+            for line in raw_bt.splitlines():
+                line = line.strip()
+                for sym in ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"):
+                    if line == sym:
+                        if current:
+                            _bt_rows.append(current)
+                        current = {"Par": sym}
+                        break
+                if "Operacoes:" in line and current:
+                    parts = line.replace("Operacoes:", "").replace("Wins:", "").replace("Losses:", "").split("|")
+                    try:
+                        current["Operações"] = int(parts[0].strip())
+                        current["Wins"] = int(parts[1].strip())
+                        current["Losses"] = int(parts[2].strip())
+                    except Exception:
+                        pass
+                if "Win rate:" in line and current:
+                    try:
+                        current["Win Rate %"] = float(line.split(":")[1].replace("%", "").strip())
+                    except Exception:
+                        pass
+                if "P&L total:" in line and current:
+                    try:
+                        pnl_part = line.split("R$")[1].split("(")[0].strip().replace(",", "")
+                        ret_part = line.split("(")[1].replace("%)", "").replace("+", "").strip()
+                        current["P&L (R$)"] = float(pnl_part)
+                        current["Retorno %"] = float(ret_part)
+                    except Exception:
+                        pass
+                if "Max drawdown:" in line and current:
+                    try:
+                        current["Max DD %"] = float(line.split(":")[1].replace("%", "").strip())
+                    except Exception:
+                        pass
+            if current and "Par" in current:
+                _bt_rows.append(current)
+
+            if _bt_rows:
+                df_cbt = pd.DataFrame(_bt_rows)
+
+                # Summary metrics
+                _total_ops = sum(r.get("Operações", 0) for r in _bt_rows)
+                _total_wins = sum(r.get("Wins", 0) for r in _bt_rows)
+                _total_pnl = sum(r.get("P&L (R$)", 0.0) for r in _bt_rows)
+                _cwr = _total_wins / _total_ops * 100 if _total_ops else 0
+
+                mc1, mc2, mc3 = st.columns(3)
+                mc1.metric("Operações totais", _total_ops)
+                mc2.metric("Win rate combinado", f"{_cwr:.1f}%")
+                pnl_delta = f"{'+'if _total_pnl>=0 else ''}{_total_pnl:,.2f}"
+                mc3.metric("P&L combinado (R$)", pnl_delta, delta=pnl_delta)
+
+                # Styled table
+                def _color_pnl(val):
+                    try:
+                        return "color: #2ecc71" if float(val) >= 0 else "color: #e74c3c"
+                    except Exception:
+                        return ""
+
+                cols_order = [c for c in ["Par", "Operações", "Wins", "Losses", "Win Rate %", "P&L (R$)", "Retorno %", "Max DD %"] if c in df_cbt.columns]
+                df_show = df_cbt[cols_order]
+                st.dataframe(
+                    df_show.style.applymap(_color_pnl, subset=[c for c in ["P&L (R$)", "Retorno %"] if c in df_show.columns]),
+                    use_container_width=True,
+                )
+
+                # Bar chart: P&L por par
+                if "P&L (R$)" in df_cbt.columns:
+                    st.subheader("P&L por par")
+                    st.bar_chart(df_cbt.set_index("Par")["P&L (R$)"])
+            else:
+                st.info("Nenhum par retornou dados suficientes para montar a tabela.")
+
+            with st.expander("Log completo do backtest"):
+                st.text(raw_bt)
 
 # ── Tab 5: Validation ─────────────────────────────────────────────────────
 
