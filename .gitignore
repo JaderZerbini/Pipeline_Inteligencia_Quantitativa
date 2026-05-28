@@ -16,8 +16,8 @@ __pycache__/
 # Logs
 *.log
 
-# Streamlit
-.streamlit/
+# Streamlit — somente secrets (config.toml é trackeado)
+.streamlit/secrets.toml
 
 # IDE
 .vscode/

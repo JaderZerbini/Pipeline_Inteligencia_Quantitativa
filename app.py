@@ -1,10 +1,12 @@
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import sys
 import pandas as pd
 import streamlit as st
+import streamlit_authenticator as stauth
 import yfinance as yf
 from streamlit_autorefresh import st_autorefresh
 
@@ -22,6 +24,72 @@ from decision_engine import BACKTEST_APPROVED
 from main import orquestrar_investimento
 
 st.set_page_config(page_title="Terminal Quant - Auditoria Automática", layout="wide")
+
+
+# ---------------------------------------------------------------------------
+# Authentication
+# ---------------------------------------------------------------------------
+
+def _load_auth() -> dict | None:
+    """Load credentials from Streamlit secrets (Railway) or local secrets.toml."""
+    # Railway / cloud: st.secrets populated from secrets.toml or env
+    try:
+        creds  = st.secrets.get("credentials")
+        cookie = st.secrets.get("cookie")
+        if creds and cookie:
+            return {
+                "credentials": {"usernames": dict(creds.get("usernames", {}))},
+                "cookie": dict(cookie),
+            }
+    except Exception:
+        pass
+
+    # Local fallback: read .streamlit/secrets.toml directly
+    secrets_path = os.path.join(os.path.dirname(__file__), ".streamlit", "secrets.toml")
+    if os.path.exists(secrets_path):
+        import toml
+        return toml.load(secrets_path)
+
+    return None
+
+
+_auth_config = _load_auth()
+
+if _auth_config is None:
+    st.error("Autenticacao nao configurada. Adicione .streamlit/secrets.toml")
+    st.stop()
+
+_authenticator = stauth.Authenticate(
+    _auth_config["credentials"],
+    _auth_config["cookie"]["name"],
+    _auth_config["cookie"]["key"],
+    _auth_config["cookie"]["expiry_days"],
+)
+
+_authenticator.login(
+    location="main",
+    fields={
+        "Form name": "Terminal Quant — Acesso Restrito",
+        "Username": "Usuario",
+        "Password": "Senha",
+        "Login": "Entrar",
+    },
+)
+
+_auth_status = st.session_state.get("authentication_status")
+
+if _auth_status is False:
+    st.error("Usuario ou senha incorretos.")
+    st.stop()
+
+if _auth_status is None:
+    st.info("Faca login para acessar o dashboard.")
+    st.stop()
+
+# ── Logged in — show logout in sidebar ─────────────────────────────────────
+with st.sidebar:
+    st.caption(f"Conectado: {st.session_state.get('name', '')}")
+    _authenticator.logout("Sair", location="sidebar")
 
 
 # ---------------------------------------------------------------------------
