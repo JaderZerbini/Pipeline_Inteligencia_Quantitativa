@@ -30,42 +30,35 @@ st.set_page_config(page_title="Terminal Quant - Auditoria Automática", layout="
 # Authentication
 # ---------------------------------------------------------------------------
 
-def _deep_dict(obj) -> dict:
-    """Recursively convert Streamlit AttrDict / TOML objects to plain dicts."""
-    if hasattr(obj, "items"):
-        return {k: _deep_dict(v) for k, v in obj.items()}
-    return obj
+def _load_auth():
+    import os, tomllib
 
-
-def _load_auth() -> dict | None:
-    """Load credentials: local file → STREAMLIT_SECRETS env var → st.secrets."""
-    import toml
-
-    # 1. Local development: read .streamlit/secrets.toml directly
-    secrets_path = Path(__file__).parent / ".streamlit" / "secrets.toml"
-    if secrets_path.exists():
-        try:
-            return toml.load(str(secrets_path))
-        except Exception:
-            pass
-
-    # 2. Railway: paste TOML content as STREAMLIT_SECRETS env var in Railway Variables
-    raw = os.getenv("STREAMLIT_SECRETS")
+    # Railway — lê STREAMLIT_SECRETS como string TOML
+    raw = os.environ.get("STREAMLIT_SECRETS", "")
     if raw:
         try:
-            return toml.loads(raw)
-        except Exception:
+            config = tomllib.loads(raw)
+            if "credentials" in config and "cookie" in config:
+                return config
+        except Exception as e:
             pass
 
-    # 3. Streamlit Cloud or other platforms with native secrets support
+    # st.secrets (Streamlit Cloud)
     try:
-        if "credentials" in st.secrets and "cookie" in st.secrets:
-            return {
-                "credentials": _deep_dict(dict(st.secrets["credentials"])),
-                "cookie":      _deep_dict(dict(st.secrets["cookie"])),
-            }
+        creds = st.secrets.get("credentials")
+        cookie = st.secrets.get("cookie")
+        if creds and cookie:
+            return {"credentials": dict(creds), "cookie": dict(cookie)}
     except Exception:
         pass
+
+    # Arquivo local
+    secrets_path = os.path.join(
+        os.path.dirname(__file__), ".streamlit", "secrets.toml"
+    )
+    if os.path.exists(secrets_path):
+        with open(secrets_path, "rb") as f:
+            return tomllib.load(f)
 
     return None
 
