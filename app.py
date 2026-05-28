@@ -30,25 +30,33 @@ st.set_page_config(page_title="Terminal Quant - Auditoria Automática", layout="
 # Authentication
 # ---------------------------------------------------------------------------
 
+def _deep_dict(obj) -> dict:
+    """Recursively convert Streamlit AttrDict / TOML objects to plain dicts."""
+    if hasattr(obj, "items"):
+        return {k: _deep_dict(v) for k, v in obj.items()}
+    return obj
+
+
 def _load_auth() -> dict | None:
-    """Load credentials from Streamlit secrets (Railway) or local secrets.toml."""
-    # Railway / cloud: st.secrets populated from secrets.toml or env
+    """Load credentials from local secrets.toml (primary) or st.secrets (Railway)."""
+    # Primary: read file directly — works locally and on Railway when secrets.toml is present
+    secrets_path = Path(__file__).parent / ".streamlit" / "secrets.toml"
+    if secrets_path.exists():
+        try:
+            import toml
+            return toml.load(str(secrets_path))
+        except Exception:
+            pass
+
+    # Fallback: st.secrets populated via STREAMLIT_SECRETS env var on Railway
     try:
-        creds  = st.secrets.get("credentials")
-        cookie = st.secrets.get("cookie")
-        if creds and cookie:
+        if "credentials" in st.secrets and "cookie" in st.secrets:
             return {
-                "credentials": {"usernames": dict(creds.get("usernames", {}))},
-                "cookie": dict(cookie),
+                "credentials": _deep_dict(dict(st.secrets["credentials"])),
+                "cookie":      _deep_dict(dict(st.secrets["cookie"])),
             }
     except Exception:
         pass
-
-    # Local fallback: read .streamlit/secrets.toml directly
-    secrets_path = os.path.join(os.path.dirname(__file__), ".streamlit", "secrets.toml")
-    if os.path.exists(secrets_path):
-        import toml
-        return toml.load(secrets_path)
 
     return None
 
