@@ -26,9 +26,9 @@ elif _key == "your_key_here":
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 _MODELS = [
-    {"id": "deepseek/deepseek-chat",            "weight": 0.40, "label": "deepseek"},
+    {"id": "qwen/qwen-2.5-7b-instruct",         "weight": 0.40, "label": "qwen"},
     {"id": "meta-llama/llama-3.3-70b-instruct", "weight": 0.35, "label": "llama"},
-    {"id": "google/gemini-2.0-flash-001",        "weight": 0.25, "label": "gemini"},
+    {"id": "google/gemini-2.5-flash",              "weight": 0.25, "label": "gemini"},
 ]
 
 _WEIGHTS = {m["label"]: m["weight"] for m in _MODELS}
@@ -37,7 +37,7 @@ _WEIGHTS = {m["label"]: m["weight"] for m in _MODELS}
 # Gemini direct fallback configuration
 # ---------------------------------------------------------------------------
 
-_GEMINI_MODEL = "gemini-2.0-flash"
+_GEMINI_MODEL = "gemini-2.5-flash-preview-05-20"
 
 # Shared executor kept alive for the Gemini fallback path only
 _gemini_executor = concurrent.futures.ThreadPoolExecutor(

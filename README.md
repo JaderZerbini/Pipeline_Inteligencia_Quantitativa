@@ -197,18 +197,15 @@ Critérios para "Operar": ≥ 5 trades históricos, win rate ≥ 55%, Sharpe ≥
 
 ## Modelos de IA (OpenRouter)
 
-| Modelo                  | Peso | ID OpenRouter                      |
-|-------------------------|------|------------------------------------|
-| DeepSeek Chat           | 40%  | `deepseek/deepseek-chat`           |
-| Meta Llama 3.3 70B      | 35%  | `meta-llama/llama-3.3-70b-instruct`|
-| Google Gemini 2.0 Flash | 25%  | `google/gemini-2.0-flash-001`      |
+| Modelo                  | Peso | ID OpenRouter                           |
+|-------------------------|------|-----------------------------------------|
+| Qwen 2.5 7B Instruct    | 40%  | `qwen/qwen-2.5-7b-instruct`            |
+| Meta Llama 3.3 70B      | 35%  | `meta-llama/llama-3.3-70b-instruct`    |
+| Google Gemini 2.5 Flash | 25%  | `google/gemini-2.5-flash`              |
 
 Custo estimado: ~R$ 1,50–2,50/mês no volume deste projeto.
 
-> **Atenção:** `google/gemini-2.0-flash-001` será depreciado no OpenRouter em **01/06/2026**.
-> Nessa data, atualize para `google/gemini-2.5-flash-preview` em `sentiment_analyzer.py` (`_MODELS`).
-
-**Fallback:** se todos os modelos OpenRouter falharem, `sentiment_analyzer.py` aciona o Gemini diretamente via `GEMINI_API_KEY` com timeout de 20s.
+**Fallback direto:** se todos os modelos OpenRouter falharem, `sentiment_analyzer.py` aciona o Gemini diretamente via `GEMINI_API_KEY` (modelo `gemini-2.5-flash-preview-05-20`) com timeout de 20s.
 
 **Consenso:** média ponderada dos scores. Veto de manipulação: qualquer modelo com peso ≥ 30% pode forçar o veredicto final para `MANIPULACAO` e clampar o score a ≤ 25.
 
