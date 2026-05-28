@@ -26,9 +26,9 @@ elif _key == "your_key_here":
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 _MODELS = [
-    {"id": "qwen/qwen-2.5-7b-instruct",         "weight": 0.40, "label": "qwen"},
-    {"id": "meta-llama/llama-3.3-70b-instruct", "weight": 0.35, "label": "llama"},
-    {"id": "google/gemini-2.5-flash",              "weight": 0.25, "label": "gemini"},
+    {"id": "google/gemini-2.5-flash",            "weight": 0.40, "label": "gemini"},
+    {"id": "meta-llama/llama-3.3-70b-instruct", "weight": 0.40, "label": "llama"},
+    {"id": "qwen/qwen-2.5-7b-instruct",         "weight": 0.20, "label": "qwen"},
 ]
 
 _WEIGHTS = {m["label"]: m["weight"] for m in _MODELS}

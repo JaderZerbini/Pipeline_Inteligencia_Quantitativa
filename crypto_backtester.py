@@ -317,13 +317,99 @@ def run_backtest(symbols: list = None, days: int = 150) -> list:
     return results
 
 
+def run_comparison() -> None:
+    """
+    Runs backtest across multiple period and position sizing
+    configurations and prints a comparison table.
+    """
+    import crypto_backtester as cb
+
+    configs = [
+        # (label, days, position_forte_pct, position_moderado_pct)
+        ("Conservador 90d  (20%/10%)",  90,  0.20, 0.10),
+        ("Conservador 150d (20%/10%)", 150,  0.20, 0.10),
+        ("Moderado 90d     (30%/15%)",  90,  0.30, 0.15),
+        ("Moderado 150d    (30%/15%)", 150,  0.30, 0.15),
+        ("Agressivo 90d    (40%/20%)",  90,  0.40, 0.20),
+        ("Agressivo 150d   (40%/20%)", 150,  0.40, 0.20),
+    ]
+
+    print(f"\n{'='*80}")
+    print("COMPARATIVO DE CONFIGURACOES — todos os pares combinados")
+    print(f"{'='*80}")
+    print(f"{'Configuracao':<30} {'Ops':>4} {'Win%':>6} {'P&L':>10} {'Retorno':>8} {'MaxDD':>7}")
+    print(f"{'-'*80}")
+
+    best_pnl = None
+    best_label = ""
+
+    for label, days, pos_forte, pos_mod in configs:
+        original_forte = cb.POSITION_SIZE_FORTE
+        original_mod   = cb.POSITION_SIZE_MODERADO
+
+        cb.POSITION_SIZE_FORTE    = pos_forte
+        cb.POSITION_SIZE_MODERADO = pos_mod
+
+        results = []
+        for symbol in cb.SYMBOLS:
+            df = cb.fetch_daily_candles(symbol, days=max(days + 210, 220))
+            if df.empty:
+                continue
+            df = cb.calculate_indicators(df)
+            df = df.tail(days).reset_index(drop=True)
+            r  = cb.backtest_symbol(symbol, df)
+            results.append(r)
+            time.sleep(0.5)
+
+        cb.POSITION_SIZE_FORTE    = original_forte
+        cb.POSITION_SIZE_MODERADO = original_mod
+
+        if not results:
+            continue
+
+        total_ops  = sum(r["trades"]      for r in results)
+        total_wins = sum(r["wins"]        for r in results)
+        total_pnl  = sum(r["total_pnl"]  for r in results)
+        avg_dd     = sum(r["max_drawdown"] for r in results) / len(results)
+        win_rate   = total_wins / total_ops * 100 if total_ops else 0
+        total_capital = cb.INITIAL_CAPITAL * len(results)
+        total_return  = total_pnl / total_capital * 100
+
+        print(
+            f"{label:<30} {total_ops:>4} {win_rate:>5.1f}% "
+            f"R${total_pnl:>+8,.2f} {total_return:>+7.2f}% {avg_dd:>6.1f}%"
+        )
+
+        if best_pnl is None or total_pnl > best_pnl:
+            best_pnl   = total_pnl
+            best_label = label
+
+    print(f"{'-'*80}")
+    print(f"Melhor configuracao por P&L: {best_label} -> R$ {best_pnl:+,.2f}")
+    print(f"{'='*80}\n")
+    print("LEGENDA:")
+    print("  Conservador: FORTE=20% do capital, MODERADO=10%")
+    print("  Moderado:    FORTE=30% do capital, MODERADO=15%")
+    print("  Agressivo:   FORTE=40% do capital, MODERADO=20%")
+    print("  MaxDD = drawdown maximo medio por par")
+    print()
+    print("ATENCAO: retorno maior sempre vem com drawdown maior.")
+    print("O MaxDD e o que voce PERDERIA no pior momento antes de recuperar.")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Crypto backtest usando dados Binance")
     parser.add_argument("--symbol", type=str, default=None,
                         help="Par a testar (ex: BTCUSDT). Padrao: todos os 4 pares")
     parser.add_argument("--days", type=int, default=150,
                         help="Numero de dias do historico (padrao: 150)")
+    parser.add_argument("--compare", action="store_true",
+                        help="Rodar comparativo entre todas as configuracoes")
     args = parser.parse_args()
 
-    symbols = [args.symbol] if args.symbol else None
-    run_backtest(symbols=symbols, days=args.days)
+    if args.compare:
+        run_comparison()
+    elif args.symbol:
+        run_backtest(symbols=[args.symbol], days=args.days)
+    else:
+        run_backtest(days=args.days)

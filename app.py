@@ -553,6 +553,29 @@ with tab_bt:
             with st.expander("Log completo do backtest"):
                 st.text(raw_bt)
 
+        st.divider()
+
+        if st.button("📊 Comparativo de configurações (demora ~2 min)"):
+            with st.spinner("Testando 6 configurações diferentes..."):
+                _cmp_proc = subprocess.run(
+                    [sys.executable, "crypto_backtester.py", "--compare"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=300,
+                )
+            _cmp_out = _cmp_proc.stdout or _cmp_proc.stderr or ""
+            st.session_state["crypto_bt_compare"] = _cmp_out
+
+        _cmp_raw = st.session_state.get("crypto_bt_compare", "")
+        if _cmp_raw:
+            st.code(_cmp_raw, language=None)
+            for _line in _cmp_raw.splitlines():
+                if "Melhor configuracao" in _line or "Melhor configuração" in _line:
+                    st.success(_line.strip())
+                    break
+
 # ── Tab 5: Validation ─────────────────────────────────────────────────────
 
 with tab_validation:
