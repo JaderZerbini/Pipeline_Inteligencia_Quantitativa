@@ -5,15 +5,19 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import os
+
 logger = logging.getLogger(__name__)
 
-DB_DIR = Path("data")
-DB_PATH = DB_DIR / "terminal_quant.db"
+# Railway mounts persistent volume at /data; locally use data/ subfolder
+_BASE = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "data")
+os.makedirs(_BASE, exist_ok=True)
+DB_PATH = os.path.join(_BASE, "terminal_quant.db")
 
 
 def _connect() -> sqlite3.Connection:
-    """Open a connection to the database, creating the data/ directory if needed."""
-    DB_DIR.mkdir(exist_ok=True)
+    """Open a connection to the database, creating the base directory if needed."""
+    os.makedirs(_BASE, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")

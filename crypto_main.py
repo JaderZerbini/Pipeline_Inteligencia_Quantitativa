@@ -45,9 +45,11 @@ from paper_trading import (
 # Configuração de log (arquivo + console)
 # ---------------------------------------------------------------------------
 
-LOG_DIR = Path("data")
-LOG_DIR.mkdir(exist_ok=True)
-LOG_FILE = LOG_DIR / "crypto_pipeline.log"
+import os as _os
+# Railway mounts persistent volume at /data; locally use data/
+_LOG_BASE = _os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "data")
+_os.makedirs(_LOG_BASE, exist_ok=True)
+LOG_FILE = _os.path.join(_LOG_BASE, "crypto_pipeline.log")
 
 _handler_file = logging.FileHandler(LOG_FILE, encoding="utf-8")
 _handler_file.setLevel(logging.INFO)

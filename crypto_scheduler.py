@@ -14,18 +14,23 @@ Por que 6 horas?
   sem gastar créditos do OpenRouter desnecessariamente
 """
 
+import os
 import subprocess
 import sys
 import time
 import logging
 from datetime import datetime, timezone, timedelta
 
+# Railway mounts persistent volume at /data; locally use data/
+_LOG_BASE = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "data")
+os.makedirs(_LOG_BASE, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("data/scheduler.log", encoding="utf-8"),
+        logging.FileHandler(os.path.join(_LOG_BASE, "scheduler.log"), encoding="utf-8"),
     ],
 )
 logger = logging.getLogger(__name__)
