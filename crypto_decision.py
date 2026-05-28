@@ -53,14 +53,24 @@ AI_TIMEOUT_SECONDS = 25
 
 def _build_crypto_prompt(signal: dict) -> str:
     """Constrói o prompt de dados enviado às IAs (contexto vem do system message)."""
+    social_vol = signal.get("social_volume_24h", 0) or 0
+    social_note = (
+        "Nota: volume social é proxy de comunidade (seguidores Twitter+Reddit), "
+        "NÃO volume de negociação. Zero indica dado indisponível, não manipulação."
+    )
     return (
         f"Ativo: {signal['symbol']}\n"
         f"Preço: ${signal['price']:,.2f}\n"
         f"Variação 24h: {signal.get('change_pct_24h', 0):+.2f}%\n"
         f"RSI(1h): {signal.get('rsi_1h', 'N/A')}\n"
         f"Galaxy Score: {signal.get('galaxy_score', 'N/A')} / 100\n"
-        f"Volume social 24h: {signal.get('social_volume_24h', 'N/A')}\n"
+        f"Volume social (proxy comunidade): {social_vol:,}\n"
+        f"{social_note}\n"
         f"Sentimento: {signal.get('sentiment', 'unknown')}\n\n"
+        "IMPORTANTE: volume social zero NÃO é evidência de manipulação — "
+        "indica apenas que dados de comunidade não estão disponíveis. "
+        "Baseie a avaliação de manipulação APENAS em padrões de preço "
+        "(pump súbito, dump rápido, variação >20% em 1h).\n\n"
         'Responda SOMENTE com JSON: '
         '{"score": 0-100, "verdict": "CONFIAVEL|RUIDO|MANIPULACAO|PUMP|FUD_COORDENADO", '
         '"reason": "uma frase curta", "flags": []}'
@@ -156,11 +166,20 @@ def evaluate_signal(signal: dict, call_ai: bool = True) -> dict:
         )
         return _make_result(symbol, "AGUARDAR", ai_score, ai_veredicto, reasons)
 
-    # Em downtrend, exige confirmação mais forte da IA
-    ai_score_min_override = None
+    # Thresholds dinâmicos de RSI e score IA baseados na tendência histórica
     if hist_trend == "downtrend":
-        ai_score_min_override = STRONG_AI_SCORE_MIN + 10
-        reasons.append("Tendência de baixa — exigindo maior confiança da IA")
+        effective_rsi_forte    = 26   # só entra muito sobrevendido em baixa
+        effective_rsi_moderate = 30
+        ai_score_min_override  = STRONG_AI_SCORE_MIN + 15  # exige 80
+        reasons.append("Tendência de baixa — thresholds mais rígidos (RSI forte≤26, mod≤30)")
+    elif hist_trend == "uptrend":
+        effective_rsi_forte    = STRONG_RSI_MAX    # 32 normal
+        effective_rsi_moderate = MODERATE_RSI_MAX  # 40 normal
+        ai_score_min_override  = None
+    else:  # neutral ou unknown
+        effective_rsi_forte    = 30
+        effective_rsi_moderate = 37
+        ai_score_min_override  = STRONG_AI_SCORE_MIN + 5  # exige 70
 
     # --- Passo 2: Consenso das IAs (só se indicadores básicos estão ok) ---
 
@@ -172,10 +191,19 @@ def evaluate_signal(signal: dict, call_ai: bool = True) -> dict:
         razao = ai_result.get("razao", "")
         reasons.append(f"IA: {ai_veredicto} (score={ai_score}) — {razao}")
 
-        # Bloqueio imediato por detecção de manipulação
+        # Bloqueio por manipulação — só bloqueia se score < 20 (alta convicção)
         if ai_veredicto in MANIPULATION_VERDICTS:
-            return _make_result(symbol, "BLOQUEADO", ai_score, ai_veredicto,
-                                [f"Manipulação detectada: {ai_veredicto} — {razao}"])
+            if ai_score < 20:
+                return _make_result(symbol, "BLOQUEADO", ai_score, ai_veredicto,
+                                    [f"Manipulação detectada: {ai_veredicto} — {razao}"])
+            else:
+                # Suspeita fraca — rebaixa para AGUARDAR sem bloquear
+                logger.info(f"[DECISION] {symbol}: manipulação fraca (score={ai_score}) — AGUARDAR")
+                reasons.append(
+                    f"IA: suspeita fraca de {ai_veredicto} (score={ai_score}) "
+                    "— aguardando confirmação"
+                )
+                return _make_result(symbol, "AGUARDAR", ai_score, ai_veredicto, reasons)
 
     # --- Passo 3: Classificação por critérios ---
 
@@ -187,21 +215,21 @@ def evaluate_signal(signal: dict, call_ai: bool = True) -> dict:
     ai_ok_forte   = not call_ai or ai_score >= _forte_threshold
     ai_ok_moderate = not call_ai or ai_score >= MODERATE_AI_SCORE_MIN
 
-    # FORTE: todos os critérios máximos
-    if (rsi <= STRONG_RSI_MAX
+    # FORTE: todos os critérios máximos (thresholds dinâmicos por tendência)
+    if (rsi <= effective_rsi_forte
             and galaxy_ok_strong
             and change <= STRONG_CHANGE_MAX
             and ai_ok_forte):
-        reasons.append(f"RSI={rsi} (≤{STRONG_RSI_MAX})")
+        reasons.append(f"RSI={rsi} (≤{effective_rsi_forte})")
         reasons.append(f"Galaxy={galaxy} (≥{STRONG_GALAXY_MIN})")
         reasons.append(f"Queda 24h={change:+.1f}% (≤{STRONG_CHANGE_MAX}%)")
         final_decision = "FORTE"
 
-    # MODERADO: critérios relaxados
-    elif (rsi <= MODERATE_RSI_MAX
+    # MODERADO: critérios relaxados (thresholds dinâmicos por tendência)
+    elif (rsi <= effective_rsi_moderate
             and galaxy_ok_moderate
             and ai_ok_moderate):
-        reasons.append(f"RSI={rsi} (≤{MODERATE_RSI_MAX})")
+        reasons.append(f"RSI={rsi} (≤{effective_rsi_moderate})")
         reasons.append(f"Galaxy={galaxy} (≥{MODERATE_GALAXY_MIN})")
         final_decision = "MODERADO"
 

@@ -447,6 +447,50 @@ with tab_bt:
                 st.success(f"Backtest concluído — {len(bt_results)} ativos analisados")
                 st.rerun()
 
+        st.divider()
+        st.subheader("Backtest B3 detalhado — simulação por ativo")
+        st.caption("RSI + Volume + MA200 com trailing stop 7% — dados Yahoo Finance.")
+
+        import subprocess as _sp
+        _days_b3 = st.slider("Período B3 (dias)", min_value=30, max_value=150,
+                              value=150, step=30, key="days_b3_slider")
+
+        _col_b3a, _col_b3b = st.columns(2)
+        with _col_b3a:
+            if st.button("▶ Rodar backtest B3"):
+                with st.spinner(f"Baixando dados do Yahoo Finance ({_days_b3} dias)..."):
+                    _b3_proc = _sp.run(
+                        [sys.executable, "b3_backtester.py", "--days", str(_days_b3)],
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        timeout=300,
+                    )
+                st.session_state["b3_bt_raw"] = _b3_proc.stdout or _b3_proc.stderr or ""
+
+        with _col_b3b:
+            if st.button("📊 Comparativo B3 (demora ~3 min)"):
+                with st.spinner("Testando 6 configurações..."):
+                    _b3_cmp = _sp.run(
+                        [sys.executable, "b3_backtester.py", "--compare"],
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        timeout=600,
+                    )
+                st.session_state["b3_bt_raw"] = _b3_cmp.stdout or _b3_cmp.stderr or ""
+
+        _b3_raw = st.session_state.get("b3_bt_raw", "")
+        if _b3_raw:
+            for _line in _b3_raw.splitlines():
+                if "Melhor configuracao" in _line:
+                    st.success(_line.strip())
+                    break
+            with st.expander("Log completo do backtest B3", expanded=True):
+                st.text(_b3_raw)
+
     with _subtab_cripto:
         import subprocess
 

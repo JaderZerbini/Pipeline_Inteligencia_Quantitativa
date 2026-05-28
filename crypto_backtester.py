@@ -125,15 +125,25 @@ def generate_signal(row: pd.Series) -> str:
         return "AGUARDAR"
 
     in_downtrend = False
+    in_uptrend = False
     if ma200 and not pd.isna(ma200):
         pct_from_ma200 = (close - ma200) / ma200 * 100
         if pct_from_ma200 > 30:
             return "BLOCKED_MA200"
         if ma20 and ma50 and not pd.isna(ma20) and not pd.isna(ma50):
             in_downtrend = ma20 < ma50
+            in_uptrend   = ma20 > ma50
 
-    rsi_forte = 32
-    rsi_moderado = 35 if in_downtrend else 40
+    if in_downtrend:
+        rsi_forte    = 26
+        rsi_moderado = 30
+    elif in_uptrend:
+        rsi_forte    = 32
+        rsi_moderado = 40
+    else:
+        rsi_forte    = 30
+        rsi_moderado = 37
+
     mom_forte = 52
     mom_moderado = 48
 
