@@ -27,14 +27,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Módulos do pipeline cripto
-from crypto_scanner import scan_crypto
-from crypto_decision import evaluate_signal, format_telegram_message
-from crypto_monitor import check_stops, open_position
+from crypto.scanner import scan_crypto
+from crypto.decision import evaluate_signal, format_telegram_message
+from crypto.monitor import check_stops, open_position
 
 # Módulos existentes do Terminal Quant (não modificados)
-from alerts import send_alert
-from db import get_connection, init_db
-from paper_trading import (
+from core.alerts import send_alert
+from core.db import get_connection, init_db
+from paper.engine import (
     execute_paper_buy as _paper_buy,
     check_paper_stops as _check_paper_stops,
     check_ai_exits as _check_ai_exits,

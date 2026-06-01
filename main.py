@@ -4,15 +4,15 @@ import sys
 import threading
 import time
 from datetime import datetime
-from db import init_db, update_signal_recommendation
-from scanner_pro import scanner_pro
-from sentiment_analyzer import analyze_news
-from news_fetcher import buscar_noticias_ticker
-from decision_engine import evaluate_signal
-from macro_monitor import fetch_macro_snapshot, evaluate_macro
-from monitor import check_stops
-from alerts import TelegramAlert, send_alert
-from paper_trading import execute_paper_buy as _paper_buy, check_paper_stops as _check_paper_stops
+from core.db import init_db, update_signal_recommendation
+from b3.scanner import scanner_pro
+from core.sentiment_analyzer import analyze_news
+from b3.news_fetcher import buscar_noticias_ticker
+from b3.decision import evaluate_signal
+from core.macro_monitor import fetch_macro_snapshot, evaluate_macro
+from b3.monitor import check_stops
+from core.alerts import TelegramAlert, send_alert
+from paper.engine import execute_paper_buy as _paper_buy, check_paper_stops as _check_paper_stops
 
 os.makedirs("data", exist_ok=True)
 
