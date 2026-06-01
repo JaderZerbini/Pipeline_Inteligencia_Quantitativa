@@ -10,8 +10,8 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 
-from db import get_connection
-from position_sizing import calculate_position
+from core.db import get_connection
+from core.position_sizing import calculate_position
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ _initialized = False
 def _ensure_init() -> None:
     global _initialized
     if not _initialized:
-        from db import init_db
+        from core.db import init_db
         init_db()
         _initialized = True
 

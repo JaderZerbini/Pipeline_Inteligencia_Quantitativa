@@ -5,7 +5,7 @@ import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
 from datetime import datetime, timezone
-from db import save_signal
+from core.db import save_signal
 
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)

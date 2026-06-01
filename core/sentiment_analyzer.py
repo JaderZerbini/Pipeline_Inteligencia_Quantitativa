@@ -11,7 +11,7 @@ import threading
 import concurrent.futures
 from google import genai
 from openai import OpenAI
-from db import save_audit
+from core.db import save_audit
 
 _key = os.getenv("OPENROUTER_API_KEY")
 if not _key:

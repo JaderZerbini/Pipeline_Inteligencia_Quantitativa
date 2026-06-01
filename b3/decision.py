@@ -4,7 +4,7 @@ import json
 import logging
 import os
 
-from db import is_in_cooldown, register_cooldown
+from core.db import is_in_cooldown, register_cooldown
 
 logger = logging.getLogger(__name__)
 

@@ -20,8 +20,8 @@ import logging
 import threading
 from datetime import datetime, timezone
 
-from db import is_in_cooldown, register_cooldown
-from sentiment_analyzer import analyze_crypto
+from core.db import is_in_cooldown, register_cooldown
+from core.sentiment_analyzer import analyze_crypto
 
 logger = logging.getLogger(__name__)
 

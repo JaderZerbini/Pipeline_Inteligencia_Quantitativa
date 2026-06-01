@@ -10,9 +10,9 @@ import time
 
 import yfinance as yf
 
-from alerts import TelegramAlert
-from db import close_operation, get_open_operations, update_peak_price
-from macro_monitor import fetch_macro_snapshot
+from core.alerts import TelegramAlert
+from core.db import close_operation, get_open_operations, update_peak_price
+from core.macro_monitor import fetch_macro_snapshot
 
 
 def check_trailing_stop(

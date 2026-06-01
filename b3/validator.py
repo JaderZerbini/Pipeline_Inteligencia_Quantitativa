@@ -15,8 +15,8 @@ import pandas_ta as ta
 import requests
 import yfinance as yf
 
-from news_fetcher import buscar_noticias_ticker
-from sentiment_analyzer import analyze_news
+from b3.news_fetcher import buscar_noticias_ticker
+from core.sentiment_analyzer import analyze_news
 
 # ---------------------------------------------------------------------------
 # Keyword map: used to evaluate news relevance per ticker

@@ -11,8 +11,8 @@ Chamado pelo crypto_main.py após cada scan.
 import logging
 from datetime import datetime, timezone
 
-from db import get_connection
-from alerts import send_alert
+from core.db import get_connection
+from core.alerts import send_alert
 
 logger = logging.getLogger(__name__)
 STOP_PCT = 0.07
