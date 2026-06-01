@@ -1,3 +1,6 @@
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -22,11 +25,6 @@ from core.db import (
 )
 from b3.decision import BACKTEST_APPROVED
 from main import orquestrar_investimento
-
-# Garante que a raiz do projeto está no Python path
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
 
 st.set_page_config(page_title="Terminal Quant - Auditoria Automática", layout="wide")
 
