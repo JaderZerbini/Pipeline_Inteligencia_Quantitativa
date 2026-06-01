@@ -52,11 +52,14 @@ def is_market_open() -> bool:
 def run_b3_pipeline():
     """Executes main.py once."""
     logger.info("B3 SCHEDULER: iniciando pipeline B3...")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    main_path = os.path.join(root, "main.py")
     try:
         result = subprocess.run(
-            [sys.executable, "main.py"],
+            [sys.executable, main_path],
             capture_output=False,
             timeout=600,  # 10 minutes max
+            cwd=root,
         )
         if result.returncode == 0:
             logger.info("B3 SCHEDULER: pipeline concluído com sucesso")

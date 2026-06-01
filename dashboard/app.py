@@ -10,7 +10,7 @@ import streamlit_authenticator as stauth
 import yfinance as yf
 from streamlit_autorefresh import st_autorefresh
 
-from db import (
+from core.db import (
     get_all_operations,
     get_closed_operations,
     get_connection,
@@ -20,7 +20,7 @@ from db import (
     get_signals_history,
     save_operation,
 )
-from decision_engine import BACKTEST_APPROVED
+from b3.decision import BACKTEST_APPROVED
 from main import orquestrar_investimento
 
 st.set_page_config(page_title="Terminal Quant - Auditoria Automática", layout="wide")
@@ -148,6 +148,9 @@ with st.sidebar:
         st.metric("P&L total", f"R$ {total_pnl:+.2f}")
 
     st.caption(f"🔄 Atualização automática ativa — última: {datetime.now().strftime('%H:%M:%S')}")
+    _is_railway = bool(os.getenv("RAILWAY_ENVIRONMENT"))
+    _env_label = "☁️ Railway" if _is_railway else "💻 Local"
+    st.caption(f"Ambiente: {_env_label}")
     st.markdown("---")
 
     # FIX 4 — Metrics glossary
@@ -520,7 +523,7 @@ with tab_bt:
 
         if st.button("▶ Rodar Backtest Agora"):
             with st.spinner("Rodando backtest..."):
-                from backtester import run_full_backtest
+                from b3.backtester import run_full_backtest
                 bt_results = run_full_backtest()
                 st.success(f"Backtest concluído — {len(bt_results)} ativos analisados")
                 st.rerun()
@@ -538,7 +541,7 @@ with tab_bt:
             if st.button("▶ Rodar backtest B3"):
                 with st.spinner(f"Baixando dados do Yahoo Finance ({_days_b3} dias)..."):
                     _b3_proc = _sp.run(
-                        [sys.executable, "b3_backtester.py", "--days", str(_days_b3)],
+                        [sys.executable, "scripts/b3_backtester.py", "--days", str(_days_b3)],
                         capture_output=True,
                         text=True,
                         encoding="utf-8",
@@ -551,7 +554,7 @@ with tab_bt:
             if st.button("📊 Comparativo B3 (demora ~3 min)"):
                 with st.spinner("Testando 6 configurações..."):
                     _b3_cmp = _sp.run(
-                        [sys.executable, "b3_backtester.py", "--compare"],
+                        [sys.executable, "scripts/b3_backtester.py", "--compare"],
                         capture_output=True,
                         text=True,
                         encoding="utf-8",
@@ -583,7 +586,7 @@ with tab_bt:
         if st.button("▶ Rodar backtest cripto"):
             with st.spinner(f"Baixando dados históricos da Binance ({_bt_days} dias)..."):
                 proc = subprocess.run(
-                    [sys.executable, "crypto_backtester.py", "--days", str(_bt_days)],
+                    [sys.executable, "crypto/backtester.py", "--days", str(_bt_days)],
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
@@ -680,7 +683,7 @@ with tab_bt:
         if st.button("📊 Comparativo de configurações (demora ~2 min)"):
             with st.spinner("Testando 6 configurações diferentes..."):
                 _cmp_proc = subprocess.run(
-                    [sys.executable, "crypto_backtester.py", "--compare"],
+                    [sys.executable, "crypto/backtester.py", "--compare"],
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
@@ -706,7 +709,7 @@ with tab_validation:
 
     if st.button("▶ Rodar Diagnóstico Completo"):
         with st.spinner("Validando dados... (calibração de IA pode levar ~60s)"):
-            from validator import (
+            from b3.validator import (
                 validate_price_data,
                 validate_rsi,
                 validate_news_relevance,
@@ -1066,7 +1069,7 @@ with tab_cripto:
 # ── Tab 7: Paper Trading ──────────────────────────────────────────────────
 
 with tab_paper:
-    from paper_trading import (
+    from paper.engine import (
         get_portfolio,
         get_open_positions,
         get_portfolio_summary,

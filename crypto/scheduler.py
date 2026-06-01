@@ -43,11 +43,14 @@ def run_pipeline():
     """Executa crypto_main.py e retorna True se bem-sucedido."""
     logger.info("=" * 50)
     logger.info("SCHEDULER: iniciando execução do pipeline cripto")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    main_path = os.path.join(root, "crypto_main.py")
     try:
         result = subprocess.run(
-            [sys.executable, "crypto_main.py"],
+            [sys.executable, main_path],
             capture_output=False,   # mostra output em tempo real
             timeout=300,            # 5 minutos máximo
+            cwd=root,
         )
         if result.returncode == 0:
             logger.info("SCHEDULER: pipeline concluído com sucesso")
