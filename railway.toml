@@ -2,9 +2,9 @@
 builder = "NIXPACKS"
 
 [deploy]
-
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
 
 [environments.production.variables]
 PYTHONUNBUFFERED = "1"
+PYTHONPATH = "/app"
