@@ -426,7 +426,7 @@ def check_ai_exits(
                     pipeline,
                 )
                 if sell_result:
-                    from alerts import send_alert
+                    from core.alerts import send_alert
                     pnl     = sell_result.get("pnl", 0)
                     pnl_pct = sell_result.get("pnl_pct", 0)
                     icon    = "📈" if pnl >= 0 else "📉"

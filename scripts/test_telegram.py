@@ -3,7 +3,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from alerts import send_alert
+from core.alerts import send_alert
 
 send_alert("""🟢 *SINAL FORTE — TESTE DO SISTEMA*
 

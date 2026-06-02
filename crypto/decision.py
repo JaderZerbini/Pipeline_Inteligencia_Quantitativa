@@ -272,7 +272,7 @@ def _make_result(symbol, decision, ai_score, ai_veredicto, reasons) -> dict:
 def _count_open_crypto_positions() -> int:
     """Retorna número de posições cripto abertas no banco."""
     try:
-        from db import get_connection
+        from core.db import get_connection
         with get_connection() as conn:
             return conn.execute(
                 "SELECT COUNT(*) FROM crypto_positions WHERE status='open'"
