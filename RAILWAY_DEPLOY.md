@@ -60,44 +60,22 @@ print('Migração concluída')
 
 ## Autenticação no Railway
 
-O dashboard exige login. As credenciais ficam em `.streamlit/secrets.toml` localmente
-(nunca sobe ao GitHub). No Railway, adicione o conteúdo do arquivo como variável:
+O dashboard usa autenticação simples via variáveis de ambiente — sem bcrypt, sem cookies, sem JWT.
 
-**Opção 1 — variável única (recomendado):**
+No Railway → Variables, adicione:
 
-No Railway → Variables, adicione `STREAMLIT_SECRETS` com o conteúdo completo do `.toml`:
+| Variável | Valor |
+|----------|-------|
+| `AUTH_USER_1` | `jader` |
+| `AUTH_PASS_1` | (sua senha) |
+| `AUTH_USER_2` | `davi` |
+| `AUTH_PASS_2` | (senha do Davi) |
 
-```toml
-[credentials.usernames.jader]
-name = "Jader"
-password = "<hash_bcrypt_jader>"
-
-[credentials.usernames.davi]
-name = "Davi"
-password = "<hash_bcrypt_davi>"
-
-[cookie]
-name = "terminal_quant_auth"
-key = "terminal_quant_secret_key_2026!!"
-expiry_days = 7
-```
-
-**Para gerar novos hashes bcrypt:**
-
-```bash
-python -c "
-import bcrypt
-for user, pwd in [('jader', 'SUA_SENHA'), ('davi', 'SENHA_DAVI')]:
-    h = bcrypt.hashpw(pwd.encode(), bcrypt.gensalt()).decode()
-    print(f'{user}: {h}')
-"
-```
-
-Substitua as senhas padrão (`senha_jader` / `senha_davi`) antes do primeiro uso.
+As senhas ficam apenas no Railway (nunca no GitHub).
 
 ## Troubleshooting
 
 - **Dashboard não abre**: verifique se a porta `$PORT` está sendo usada pelo Streamlit
 - **Banco vazio após redeploy**: confirme que o volume `/data` está montado corretamente
 - **Scheduler não dispara**: verifique logs em Railway → Deployments → Logs
-- **Login não aparece**: verifique se `.streamlit/secrets.toml` existe localmente ou se `STREAMLIT_SECRETS` está configurado no Railway
+- **Login não funciona**: verifique se `AUTH_USER_1`/`AUTH_PASS_1` estão configurados em Railway → Variables

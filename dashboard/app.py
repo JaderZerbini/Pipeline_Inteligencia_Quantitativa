@@ -9,7 +9,6 @@ from pathlib import Path
 import sys
 import pandas as pd
 import streamlit as st
-import streamlit_authenticator as stauth
 import yfinance as yf
 from streamlit_autorefresh import st_autorefresh
 
@@ -30,71 +29,38 @@ st.set_page_config(page_title="Terminal Quant - Auditoria Automática", layout="
 
 
 # ---------------------------------------------------------------------------
-# Authentication
+# Authentication — simple session-state gate, no external dependencies
 # ---------------------------------------------------------------------------
 
-def _load_auth():
-    import os, tomllib
+def _check_auth() -> bool:
+    USERS = {
+        os.getenv("AUTH_USER_1", "jader"): os.getenv("AUTH_PASS_1", ""),
+        os.getenv("AUTH_USER_2", "davi"):  os.getenv("AUTH_PASS_2", ""),
+    }
+    if st.session_state.get("_authenticated"):
+        return True
+    st.markdown("## 🔐 Terminal Quant")
+    u = st.text_input("Usuário")
+    p = st.text_input("Senha", type="password")
+    if st.button("Entrar"):
+        if u in USERS and USERS[u] and p == USERS[u]:
+            st.session_state["_authenticated"] = True
+            st.session_state["_username"] = u
+            st.rerun()
+        else:
+            st.error("Usuário ou senha incorretos.")
+            return False
+    return False
 
-    # Railway — lê STREAMLIT_SECRETS como string TOML
-    raw = os.environ.get("STREAMLIT_SECRETS", "")
-    if raw:
-        try:
-            config = tomllib.loads(raw)
-            if "credentials" in config and "cookie" in config:
-                return config
-        except Exception as e:
-            pass
-
-    # st.secrets (Streamlit Cloud)
-    try:
-        creds = st.secrets.get("credentials")
-        cookie = st.secrets.get("cookie")
-        if creds and cookie:
-            return {"credentials": dict(creds), "cookie": dict(cookie)}
-    except Exception:
-        pass
-
-    # Arquivo local
-    secrets_path = os.path.join(
-        os.path.dirname(__file__), ".streamlit", "secrets.toml"
-    )
-    if os.path.exists(secrets_path):
-        with open(secrets_path, "rb") as f:
-            return tomllib.load(f)
-
-    return None
-
-
-_auth_config = _load_auth()
-
-if _auth_config is None:
-    st.error("Autenticacao nao configurada. Adicione .streamlit/secrets.toml")
-    st.stop()
-
-_authenticator = stauth.Authenticate(
-    _auth_config["credentials"],
-    _auth_config["cookie"]["name"],
-    _auth_config["cookie"]["key"],
-    _auth_config["cookie"]["expiry_days"],
-)
-
-_name, _auth_status, _username = _authenticator.login(
-    "Terminal Quant — Acesso Restrito", location="main"
-)
-
-if _auth_status is False:
-    st.error("Usuario ou senha incorretos.")
-    st.stop()
-
-if _auth_status is None:
-    st.info("Faca login para acessar o dashboard.")
+if not _check_auth():
     st.stop()
 
 # ── Logged in — show logout in sidebar ─────────────────────────────────────
 with st.sidebar:
-    st.caption(f"Conectado: {_name or ''}")
-    _authenticator.logout("Sair", location="sidebar")
+    st.caption(f"👤 {st.session_state.get('_username', '')}")
+    if st.button("Sair"):
+        st.session_state["_authenticated"] = False
+        st.rerun()
 
 
 # ---------------------------------------------------------------------------
