@@ -165,6 +165,9 @@ def run_pipeline(dry_run: bool = False) -> None:
         report_rows.append(row)
         logger.info(row.strip())
 
+        if not dry_run:
+            _save_crypto_signal(result, signal)
+
         if result["decision"] in ("FORTE", "MODERADO"):
             actionable.append((signal, result))
 
@@ -182,8 +185,6 @@ def run_pipeline(dry_run: bool = False) -> None:
             print("-" * 40)
 
             if not dry_run:
-                # Persiste no banco
-                _save_crypto_signal(result, signal)
                 # Envia alerta Telegram
                 try:
                     send_alert(msg)
