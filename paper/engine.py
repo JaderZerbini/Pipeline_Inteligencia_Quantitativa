@@ -326,7 +326,7 @@ def evaluate_exit(
     Asks the AI whether an open paper position should be closed.
     Returns {"should_exit": bool, "reason": str, "confidence": int}.
     """
-    from sentiment_analyzer import analyze_crypto
+    from core.sentiment_analyzer import analyze_crypto
 
     symbol        = position["symbol"]
     entry_price   = position["entry_price"]
