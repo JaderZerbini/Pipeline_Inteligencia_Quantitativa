@@ -78,7 +78,7 @@ password = "<hash_bcrypt_davi>"
 
 [cookie]
 name = "terminal_quant_auth"
-key = "terminal_quant_secret_key_2026"
+key = "terminal_quant_secret_key_2026!!"
 expiry_days = 7
 ```
 

@@ -79,17 +79,9 @@ _authenticator = stauth.Authenticate(
     _auth_config["cookie"]["expiry_days"],
 )
 
-_authenticator.login(
-    location="main",
-    fields={
-        "Form name": "Terminal Quant — Acesso Restrito",
-        "Username": "Usuario",
-        "Password": "Senha",
-        "Login": "Entrar",
-    },
+_name, _auth_status, _username = _authenticator.login(
+    "Terminal Quant — Acesso Restrito", location="main"
 )
-
-_auth_status = st.session_state.get("authentication_status")
 
 if _auth_status is False:
     st.error("Usuario ou senha incorretos.")
@@ -101,7 +93,7 @@ if _auth_status is None:
 
 # ── Logged in — show logout in sidebar ─────────────────────────────────────
 with st.sidebar:
-    st.caption(f"Conectado: {st.session_state.get('name', '')}")
+    st.caption(f"Conectado: {_name or ''}")
     _authenticator.logout("Sair", location="sidebar")
 
 
