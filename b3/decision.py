@@ -116,13 +116,19 @@ def evaluate_signal(signal: dict, audit: dict, macro: dict = None) -> dict:
     else:
         effective_score = audit.get("score", 50)
 
-    # Priority 1: manipulation always blocks regardless of technicals
+    # Priority 1: manipulation is an unconditional hard stop — return immediately
+    # so no downstream gate (MA200, backtest, cooldown) can override this block.
     if verdict == "MANIPULACAO":
-        recommendation = "BLOQUEADO"
         reasons.append(f"Manipulação detectada pelo auditor IA (score={effective_score})")
+        return {
+            "recommendation": "BLOQUEADO",
+            "confidence": 0.00,
+            "reasons": reasons,
+            "flags": flags,
+        }
 
     # Priority 2: strong buy — oversold RSI + high volume + trusted audit
-    elif rsi < 30 and volume_ratio > 1.5 and effective_score >= 70:
+    if rsi < 30 and volume_ratio > 1.5 and effective_score >= 70:
         recommendation = "FORTE"
         reasons.append(f"RSI em zona de reversão ({rsi:.1f} < 30)")
         reasons.append(f"Volume {volume_ratio:.2f}x acima da média de 20 dias")

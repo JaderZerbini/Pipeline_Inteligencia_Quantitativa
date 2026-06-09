@@ -191,19 +191,10 @@ def evaluate_signal(signal: dict, call_ai: bool = True) -> dict:
         razao = ai_result.get("razao", "")
         reasons.append(f"IA: {ai_veredicto} (score={ai_score}) — {razao}")
 
-        # Bloqueio por manipulação — só bloqueia se score < 20 (alta convicção)
+        # Manipulação é bloqueio incondicional — score não atenua, por decisão de segurança.
         if ai_veredicto in MANIPULATION_VERDICTS:
-            if ai_score < 20:
-                return _make_result(symbol, "BLOQUEADO", ai_score, ai_veredicto,
-                                    [f"Manipulação detectada: {ai_veredicto} — {razao}"])
-            else:
-                # Suspeita fraca — rebaixa para AGUARDAR sem bloquear
-                logger.info(f"[DECISION] {symbol}: manipulação fraca (score={ai_score}) — AGUARDAR")
-                reasons.append(
-                    f"IA: suspeita fraca de {ai_veredicto} (score={ai_score}) "
-                    "— aguardando confirmação"
-                )
-                return _make_result(symbol, "AGUARDAR", ai_score, ai_veredicto, reasons)
+            return _make_result(symbol, "BLOQUEADO", ai_score, ai_veredicto,
+                                [f"Manipulação detectada: {ai_veredicto} — {razao}"])
 
     # --- Passo 3: Classificação por critérios ---
 

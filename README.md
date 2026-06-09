@@ -161,6 +161,8 @@ Para detalhes do autostart, consulte `AUTOSTART.md`.
 | MODERADO     | < 38     | > 1.2x       | ≥ 55             | —                      |
 | AGUARDAR     | outros   | outros       | outros           | —                      |
 
+**BLOQUEADO é incondicional:** quando o auditor IA detecta manipulação (`verdict == MANIPULACAO` no B3, ou `MANIPULACAO / PUMP / FUD_COORDENADO` no cripto), o sistema bloqueia imediatamente, independente do score de confiança da IA ou de qualquer outro indicador. Nenhum gate posterior pode sobrescrever esse bloqueio.
+
 **Ajuste macro:** quando `macro_ok = False` (score_adjustment ≤ −16), sinal FORTE é rebaixado para MODERADO.
 
 **Score efetivo** = score do modelo (0–100) + `score_adjustment` do contexto macro, limitado ao intervalo [0, 100].
