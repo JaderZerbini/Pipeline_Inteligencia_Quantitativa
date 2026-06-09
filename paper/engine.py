@@ -430,14 +430,25 @@ def check_ai_exits(
                     pnl     = sell_result.get("pnl", 0)
                     pnl_pct = sell_result.get("pnl_pct", 0)
                     icon    = "📈" if pnl >= 0 else "📉"
+                    pnl_icon = "✅" if pnl >= 0 else "❌"
+                    pnl_word = "Ganho" if pnl >= 0 else "Perda"
+                    hist_line = (
+                        f"📊 {current.get('hist_context', '')}\n"
+                        if current.get("hist_context") else ""
+                    )
                     send_alert(
-                        f"{icon} *{symbol}* — SAÍDA POR IA (paper)\n"
-                        f"💲 Entrada: ${pos['entry_price']:,.2f}\n"
-                        f"💲 Saída: ${current['price']:,.2f}\n"
-                        f"{'✅' if pnl >= 0 else '❌'} P&L: "
-                        f"R$ {pnl:+.2f} ({pnl_pct:+.2f}%)\n"
-                        f"🤖 Motivo: {eval_result['reason']}\n"
-                        f"📊 {current.get('hist_context', '')}"
+                        f"{icon} *{symbol}* — Simulação: IA sugere vender\n"
+                        f"\n"
+                        f"A inteligência artificial analisou a posição e recomenda encerramento.\n"
+                        f"\n"
+                        f"📍 Preço de entrada: ${pos['entry_price']:,.2f}\n"
+                        f"📍 Preço atual: ${current['price']:,.2f}\n"
+                        f"{pnl_icon} {pnl_word} simulado: R$ {abs(pnl):.2f} ({pnl_pct:+.2f}%)\n"
+                        f"\n"
+                        f"Motivo: {eval_result['reason']}\n"
+                        f"{hist_line}"
+                        f"\n"
+                        f"⚠️ Simulação — nenhuma ordem real foi enviada."
                     )
                     exited.append({"symbol": symbol, **sell_result})
             else:

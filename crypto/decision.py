@@ -276,20 +276,35 @@ def format_telegram_message(signal: dict, result: dict) -> str:
     """Formata o alerta que será enviado via alerts.py existente."""
     from position_sizing import calculate_position
 
-    emoji = {"FORTE": "🟢", "MODERADO": "🟡", "AGUARDAR": "⬜", "BLOQUEADO": "🔴"}
-    icon = emoji.get(result["decision"], "⬜")
+    label = {"FORTE": "COMPRA FORTE", "MODERADO": "COMPRA MODERADA"}.get(
+        result["decision"], result["decision"]
+    )
+    icon = {"FORTE": "🟢", "MODERADO": "🟡", "AGUARDAR": "⬜", "BLOQUEADO": "🔴"}.get(
+        result["decision"], "⬜"
+    )
+    change = signal.get("change_pct_24h", 0)
+    rsi = signal.get("rsi_1h", "N/A")
+    change_desc = f"caiu {abs(change):.1f}%" if change < 0 else f"subiu {change:.1f}%"
+    plain_reason = (
+        f"Por que agora? O preço {change_desc} e o índice de pressão "
+        f"está em {rsi} — zona de possível recuperação."
+    )
 
     lines = [
-        f"{icon} *{result['symbol']}* — {result['decision']}",
-        f"💲 Preço: ${signal['price']:,.2f}",
-        f"📉 24h: {signal.get('change_pct_24h', 0):+.2f}%",
-        f"📊 RSI(1h): {signal.get('rsi_1h', 'N/A')}",
-        f"🌕 Galaxy Score: {signal.get('galaxy_score', 'N/A')}",
-        f"🤖 IA Score: {result['ai_score']} | {result['ai_veredicto']}",
-        f"📈 Histórico: {signal.get('hist_context', 'N/A')}",
+        f"{icon} *{result['symbol']}* — {label}",
         "",
-        *[f"• {r}" for r in result["reasons"][:3]],
+        f"💵 Preço atual: ${signal['price']:,.2f}",
+        f"📉 Últimas 24h: {change_desc}",
+        f"📊 Índice de pressão: RSI {rsi} (abaixo de 40 = possível recuperação)",
+        f"🌐 Interesse da comunidade: {signal.get('galaxy_score', 'N/A')}/100",
+        f"🤖 Confiança da IA: {result['ai_score']}/100 — {result['ai_veredicto']}",
     ]
+
+    hist_ctx = signal.get("hist_context")
+    if hist_ctx and hist_ctx != "N/A":
+        lines.append(f"📈 Contexto histórico: {hist_ctx}")
+
+    lines += ["", plain_reason]
 
     if result["decision"] in ("FORTE", "MODERADO"):
         open_pos = _count_open_crypto_positions()
@@ -297,13 +312,13 @@ def format_telegram_message(signal: dict, result: dict) -> str:
         if sizing["allowed"]:
             lines += [
                 "",
-                f"💰 Sugestão: ${sizing['alloc_value']:.2f} "
-                f"({sizing['alloc_pct']*100:.0f}% de $1.000)",
-                f"   = {sizing['units']:.4f} unidades",
-                "   ⚠️ Capital padrão: ajuste no dashboard",
+                f"💰 Sugestão de alocação: ${sizing['alloc_value']:.2f} "
+                f"({sizing['alloc_pct']*100:.0f}% do capital de $1.000)",
+                f"   = {sizing['units']:.4f} unidades de {result['symbol']}",
+                "   ⚠️ Capital padrão — ajuste no dashboard se necessário",
             ]
         else:
-            lines += ["", f"⛔ Sizing: {sizing['reason']}"]
+            lines += ["", f"⛔ Alocação bloqueada: {sizing['reason']}"]
 
     return "\n".join(lines)
 

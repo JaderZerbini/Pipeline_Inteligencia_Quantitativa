@@ -91,22 +91,16 @@ class TelegramAlert:
     async def enviar_alerta_compra(self, ativo: str, rsi: float, veredito: str) -> None:
         if self._disabled:
             return
-        msg = (
-            f"🚀 **SINAL DE COMPRA: {ativo}**\n\n"
-            f"📈 RSI: {rsi:.2f}\n"
-            f"🛡️ AUDITORIA FRANK: \n{veredito}\n\n"
-            f"💡 Verifique seu app do Nubank!"
-        )
-        await self._bot.send_message(chat_id=self._chat_id, text=msg, parse_mode="Markdown")
+        await self._bot.send_message(chat_id=self._chat_id, text=veredito, parse_mode="Markdown")
 
     async def enviar_alerta_venda(self, ativo: str, motivo: str, preco_atual: float) -> None:
         if self._disabled:
             return
         msg = (
-            f"⚠️ **HORA DE VENDER: {ativo}**\n\n"
-            f"📉 Motivo: {motivo}\n"
-            f"💰 Preço Atual: R$ {preco_atual:.2f}\n\n"
-            f"🔒 Proteja seu capital no Nubank!"
+            f"⚠️ *Hora de vender: {ativo}*\n\n"
+            f"Motivo: {motivo}\n"
+            f"💰 Preço atual: R$ {preco_atual:.2f}\n\n"
+            f"Revise sua posição no seu app de investimentos."
         )
         await self._bot.send_message(chat_id=self._chat_id, text=msg, parse_mode="Markdown")
 

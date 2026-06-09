@@ -78,14 +78,20 @@ def check_stops(current_prices: dict, dry_run: bool = False) -> list:
 
         if current <= stop_price:
             pnl_pct = (current - entry) / entry * 100
+            result_icon = "✅" if pnl_pct >= 0 else "❌"
+            result_word = "Lucro" if pnl_pct >= 0 else "Prejuízo"
             msg = (
-                f"🔴 *{symbol}* — STOP ATINGIDO\n"
-                f"💲 Entrada: ${entry:,.2f}\n"
-                f"💲 Saída sugerida: ${current:,.2f}\n"
-                f"📊 Máximo: ${new_highest:,.2f}\n"
-                f"{'📈' if pnl_pct >= 0 else '📉'} "
-                f"Resultado: {pnl_pct:+.2f}%\n"
-                f"⚠️ Trailing stop de {stop_pct*100:.0f}% atingido"
+                f"🔴 *{symbol}* — Hora de vender\n"
+                f"\n"
+                f"O preço caiu {stop_pct*100:.0f}% desde o ponto mais alto, "
+                f"ativando a proteção automática.\n"
+                f"\n"
+                f"💵 Você comprou por: ${entry:,.2f}\n"
+                f"💵 Preço atual: ${current:,.2f}\n"
+                f"📊 Preço mais alto atingido: ${new_highest:,.2f}\n"
+                f"{result_icon} {result_word}: {pnl_pct:+.2f}%\n"
+                f"\n"
+                f"Considere vender agora para proteger seu resultado."
             )
             logger.info(
                 f"[MONITOR] STOP: {symbol} @ ${current:,.2f} "

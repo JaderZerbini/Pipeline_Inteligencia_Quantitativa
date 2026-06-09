@@ -186,12 +186,13 @@ def orquestrar_investimento() -> list[dict]:
             if macro_result.get("warnings"):
                 summary += "\n⚠️ Contexto macro: " + " | ".join(macro_result["warnings"])
             _hist_ctx = signal_dict.get("hist_context", "")
+            _label = "forte" if decision["recommendation"] == "FORTE" else "moderada"
             send_alert(
-                f"🚀 *SINAL DE COMPRA: {ticker}*\n\n"
-                f"📈 RSI: {row['RSI']:.2f}\n"
-                + (f"📊 Histórico: {_hist_ctx}\n" if _hist_ctx else "")
-                + f"🛡️ ANÁLISE IA:\n{summary}\n\n"
-                f"💡 Verifique seu app do Nubank!"
+                f"🟢 *{ticker}* — Oportunidade de compra {_label}\n\n"
+                + (f"📊 {_hist_ctx}\n\n" if _hist_ctx else "")
+                + f"🤖 Análise: {summary}\n\n"
+                f"💡 Confiança: {decision['confidence']:.0%}\n"
+                f"⚠️ Sugestão de análise — a decisão final é sempre sua."
             )
             try:
                 _paper_buy(

@@ -61,7 +61,12 @@ def check_stops(messenger: TelegramAlert = None) -> list[dict]:
             messenger.enviar_alerta_compra(
                 "MACRO",
                 0,
-                "⚠️ Macro adverso detectado — revise suas posições abertas",
+                (
+                    "⚠️ *Alerta de mercado*\n\n"
+                    "Condições macroeconômicas adversas foram detectadas.\n\n"
+                    "O dólar subiu mais de 2% ou o petróleo caiu mais de 3%.\n"
+                    "Revise suas posições abertas — o mercado pode estar instável."
+                ),
             )
         )
         print("[MACRO] Alerta adverso enviado via Telegram.")
@@ -94,14 +99,23 @@ def check_stops(messenger: TelegramAlert = None) -> list[dict]:
             triggered.append(
                 {"op_id": op_id, "ticker": ticker, "entry": entry, "exit": current, "pnl_brl": pnl_brl}
             )
+            _pnl_icon = "✅" if pnl_brl >= 0 else "❌"
+            _pnl_word = "Lucro" if pnl_brl >= 0 else "Prejuízo"
             asyncio.run(
                 messenger.enviar_alerta_compra(
                     ticker,
                     0,
                     (
-                        f"TRAILING STOP ativado | "
-                        f"entrada R${entry:.2f} | saida R${current:.2f} | "
-                        f"stop ref. R${stop:.2f} | P&L R${pnl_brl:+.2f}/acao"
+                        f"🔴 *{ticker}* — Hora de vender\n"
+                        f"\n"
+                        f"O preço caiu 7% desde o ponto mais alto, "
+                        f"ativando a proteção automática.\n"
+                        f"\n"
+                        f"💵 Você comprou por: R$ {entry:.2f}\n"
+                        f"💵 Preço atual: R$ {current:.2f}\n"
+                        f"{_pnl_icon} {_pnl_word}: R$ {pnl_brl:+.2f} por ação\n"
+                        f"\n"
+                        f"Considere vender agora para proteger seu resultado."
                     ),
                 )
             )
