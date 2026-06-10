@@ -1,0 +1,4 @@
+# requirements-ci.txt — deps exclusivos para rodar os testes no GitHub Actions
+# Os módulos testados (b3/decision, crypto/decision, core/db) usam só stdlib,
+# então apenas pytest é necessário.
+pytest>=9.0
