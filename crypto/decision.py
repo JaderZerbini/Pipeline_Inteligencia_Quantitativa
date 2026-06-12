@@ -21,7 +21,6 @@ import threading
 from datetime import datetime, timezone
 
 from core.db import is_in_cooldown, register_cooldown
-from core.sentiment_analyzer import analyze_crypto
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +87,7 @@ def _get_ai_consensus(signal: dict) -> dict:
     def _call():
         nonlocal result
         try:
+            from core.sentiment_analyzer import analyze_crypto  # lazy: evita importar SDKs de IA na coleta
             prompt = _build_crypto_prompt(signal)
             consensus = analyze_crypto(prompt)
             if consensus:
