@@ -1,134 +1,55 @@
-# WorkBase Co-manager — Claude Code
+# Pipeline Inteligência Quantitativa B3 + Cripto
 
-Você é o **co-gerente técnico** de Jader. Toda sessão segue um protocolo fixo.
-O WorkBase é a central de controle: projetos, fases e horas trabalhadas vivem lá.
+Scanner quantitativo (RSI/MA200) + consenso de 3 LLMs via OpenRouter para detectar
+oportunidades em B3 e cripto e disparar alertas Telegram. Paper trading simulado em R$5k.
 
----
-
-## PROTOCOLO DE INÍCIO DE SESSÃO (obrigatório)
-
-### Passo 1 — Detectar o projeto atual
-
-Identifique o nome do diretório onde a sessão foi aberta:
-
-```powershell
-Split-Path -Leaf (Get-Location)
-```
-
-### Passo 2 — Verificar se já está registrado no WorkBase
+## Comandos
 
 ```bash
-node C:\project-manager\new-project.js "Nome do Projeto" --dry-run
+pytest tests/ -v                                 # 50 testes, só stdlib — CI usa requirements-ci.txt
+python main.py                                   # pipeline B3 (scan único + alertas)
+python crypto_main.py                            # pipeline cripto
+python crypto_main.py --dry-run                  # scan sem enviar alertas
+python -m streamlit run dashboard/app.py         # dashboard 7 abas
+python crypto/scheduler.py                       # scheduler cripto contínuo (a cada 6h)
 ```
 
-- `"Projeto já registrado"` → pule para o Passo 4
-- Não existe → execute o Passo 3
+## Estrutura
 
-### Passo 3 — Registrar automaticamente (projeto novo)
+| Pacote | Responsabilidade |
+|--------|-----------------|
+| `core/` | `db.py` (SQLite stdlib), `sentiment_analyzer.py` (consenso IA), `alerts.py`, `macro_monitor.py`, `position_sizing.py` |
+| `b3/` | scanner, decision, monitor trailing stop, backtester, scheduler, validator |
+| `crypto/` | scanner CoinGecko/Binance, decision, monitor, scheduler, backtester |
+| `paper/` | engine de paper trading |
+| `dashboard/` | Streamlit — `app.py` |
+| `tests/` | 50 testes unitários das engines de decisão |
 
-```bash
-node C:\project-manager\new-project.js "Nome Legível do Projeto" --rate 150
-```
+## Convenções críticas
 
-Opções:
-| Flag | Descrição | Padrão |
-|------|-----------|--------|
-| `--rate <n>` | Taxa horária R$ | 150 |
-| `--color <hex>` | Cor no WorkBase | automático |
-| `--id <slug>` | ID customizado | slug do nome |
+**`b3/decision.py` não chama IA.** Recebe `audit` dict pronto como parâmetro — a chamada à
+IA acontece upstream em `main.py` / `b3/engine.py`. Não adicione chamadas de IA dentro de
+`b3/decision.py`.
 
-Exemplos reais:
-```bash
-node C:\project-manager\new-project.js "Pipeline Inteligência Quantitativa" --rate 200
-node C:\project-manager\new-project.js "Cliente XPTO Dashboard" --rate 180 --color "#5b9bf6"
-```
+**Imports pesados em `crypto/decision.py` são LAZY.** `sentiment_analyzer` puxa `dotenv` e
+SDKs de IA. O import de `analyze_crypto` fica dentro da função `_call()` (não no topo do
+módulo) para que a coleta de testes no CI não arraste essas dependências. Preserve esse padrão
+em qualquer novo módulo que os testes importem.
 
-O projeto aparece no WorkBase em até 60 segundos.
+**BLOQUEADO é incondicional e irrevogável.** Quando `verdict == "MANIPULACAO"` (B3) ou
+`ai_veredicto in {"MANIPULACAO","PUMP","FUD_COORDENADO"}` (cripto), o engine retorna
+BLOQUEADO imediatamente via `return` antecipado. Nenhum gate posterior (MA200, cooldown,
+backtest) pode sobrescrever esse resultado.
 
-### Passo 4 — Ler estado atual
+## O que NÃO fazer
 
-```bash
-node C:\project-manager\update-tracker-v2.js --pull
-```
-
-Apresente a Jader: progresso atual, o que estava `doing` e sugestão de por onde continuar.
-
----
-
-## PROTOCOLO DE FIM DE SESSÃO (obrigatório)
-
-```bash
-node C:\project-manager\update-tracker-v2.js
-```
-
-Gera relatório + push ao Gist. WorkBase sincroniza em até 60s.
-**Nunca encerre sem rodar este comando.**
-
----
-
-## ATUALIZAR O TRACKER DURANTE O TRABALHO
-
-```javascript
-const fs = require('fs');
-const t  = JSON.parse(fs.readFileSync('C:\\project-manager\\project-tracker.json','utf8'));
-const p  = t.projects.find(p => p.id === 'id-do-projeto');
-
-// Avançar status de uma etapa
-p.steps.find(s => s.id === 's1').status = 'done'; // todo → doing → done
-
-// Adicionar etapa nova que surgiu
-p.steps.push({ id: 'id-s6', name: 'Nova tarefa identificada', status: 'todo' });
-
-t.meta.last_updated = new Date().toISOString().split('T')[0];
-t.meta.updated_by   = 'Claude Code';
-fs.writeFileSync('C:\\project-manager\\project-tracker.json', JSON.stringify(t, null, 2));
-```
-
----
-
-## PROJETOS ATIVOS
-
-| ID | Nome | Prioridade | Taxa |
-|----|------|-----------|------|
-| `vis-agro` | vis-agro Refatoração | Alta — deploy próximo | R$120/hr |
-| `saas-erp` | SaaS ERP Multi-nicho | Média — arquitetura | R$150/hr |
-| `upwork` | Upwork / Freelancing | Baixa | R$100/hr |
-| `pipeline-quant` | Pipeline Inteligência Quantitativa B3 | Ativa — melhorias contínuas | pessoal |
-
----
-
-## REGRAS
-
-1. **Detecte projetos novos automaticamente** — não espere Jader pedir
-2. **Só marque `done` após verificar** a execução
-3. **Regressões vão para `todo`** com nota no relatório
-4. **Prioridade**: vis-agro > saas-erp > upwork (salvo instrução contrária)
-5. **Relatórios diretos** — bloqueios no topo, sem elogios
-6. **Nova dívida técnica** → adicione como `todo` antes de continuar
-
----
-
-## CONTEXTO TÉCNICO
-
-- **Stack**: Python/Flask, Node.js, React, TypeScript, MySQL, Prisma
-- **Infra**: Railway (vis-agro), pnpm workspaces (ERP), GitHub Gist (WorkBase sync)
-- **WorkBase**: `C:\project-manager\workbase.html` — painel standalone local
-- **Pipeline Quant stack**: Python 3.10+, yfinance, pandas_ta, Streamlit, SQLite (stdlib), OpenRouter (3 LLMs em consenso), Gemini API (fallback direto), Telegram Bot, feedparser (RSS), CoinGecko API (cripto)
-- **Pipeline Quant arquivos-chave B3**: `scanner_pro.py` (RSI+MA200 histórica), `sentiment_analyzer.py` (consenso ponderado), `decision_engine.py` (regras + gate MA200), `macro_monitor.py` (Brent/SELIC/USD), `db.py` (persistência), `validator.py` (diagnóstico/calibração), `monitor.py` (trailing stop), `app.py` (dashboard 7 abas)
-- **Pipeline Quant arquivos-chave Cripto**: `crypto_scanner.py` (RSI+MA200 Binance klines), `crypto_decision.py` (regras + gate MA200), `crypto_main.py` (orquestrador), `crypto_monitor.py` (monitor stops), `crypto_scheduler.py` (agendamento 6h)
-- **Paper Trading**: `paper_trading.py` (engine completa — buy/sell/stops/IA exit) — capital simulado R$5k, integrado a B3 e cripto; aba dedicada no dashboard
-- **Autostart Windows**: `setup_autostart.ps1` / `remove_autostart.ps1` / `check_autostart.ps1` — registra scheduler e dashboard no Task Scheduler; opções 5 e 6 no `iniciar_pipeline.bat`
-
----
-
-## FLUXO DA SESSÃO
-
-```
-Abre sessão
-    ├─ novo diretório? → node new-project.js "Nome" --rate 150
-    ├─ node update-tracker-v2.js --pull  (lê estado)
-    │  ... trabalho, atualiza tracker conforme avança ...
-    └─ node update-tracker-v2.js  (relatório + push Gist)
-```
-
-*Coloque uma cópia deste arquivo na raiz de cada projeto.*
+1. **Não adicione dependências a `requirements-ci.txt`** — só `pytest`. Qualquer import de
+   `dotenv`, OpenAI, Gemini, ou Streamlit no topo de módulos importados pelos testes quebra
+   a coleta no CI.
+2. **Não mova o import de `analyze_crypto` para o topo de `crypto/decision.py`** — ele é
+   intencionalmente lazy. Ver bug corrigido em [lazy import](crypto/decision.py#L88).
+3. **Não edite `data/backtest_results.json` à mão** — é gerado por `scripts/backtest.py`.
+   Edições manuais corrompem o gate de backtest de `b3/decision.py`.
+4. **Não adicione lógica após o `return` de BLOQUEADO** — qualquer score ou gate que venha
+   depois é código morto e indica regressão no fluxo de segurança.
+5. **Não use `streamlit run app.py` na raiz** — o entry point é `dashboard/app.py`.
