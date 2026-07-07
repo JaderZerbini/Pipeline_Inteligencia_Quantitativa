@@ -1,6 +1,19 @@
-"""Persistence layer for Terminal Quant using SQLite (stdlib only)."""
+"""Persistence layer for Terminal Quant.
+
+Dual backend:
+  * PostgreSQL (Supabase) when the DATABASE_URL env var is set.
+  * SQLite (stdlib) as the local fallback otherwise.
+
+The rest of the codebase keeps using the sqlite3-style API
+(``conn.execute(sql, params)``, ``cursor.lastrowid``,
+``conn.row_factory = sqlite3.Row``). When running on PostgreSQL a thin
+wrapper reproduces that API: it rewrites ``?`` placeholders to ``%s``,
+maps ``row_factory`` to ``RealDictCursor`` so ``dict(row)`` keeps working,
+and appends ``RETURNING id`` to INSERTs so ``lastrowid`` is populated.
+"""
 
 import logging
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -9,14 +22,166 @@ import os
 
 logger = logging.getLogger(__name__)
 
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+IS_POSTGRES = bool(DATABASE_URL)
+
 # Railway mounts persistent volume at /data; locally use data/ subfolder
 _BASE = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "data")
 os.makedirs(_BASE, exist_ok=True)
 DB_PATH = os.path.join(_BASE, "terminal_quant.db")
 
+# --------------------------------------------------------------------------- #
+# PostgreSQL compatibility layer
+# --------------------------------------------------------------------------- #
+if IS_POSTGRES:
+    try:
+        import psycopg2
+        import psycopg2.extras
+    except ImportError as exc:  # pragma: no cover - clear message on misconfig
+        raise ImportError(
+            "DATABASE_URL is set but psycopg2 is not installed. "
+            "Run: pip install psycopg2-binary"
+        ) from exc
 
-def _connect() -> sqlite3.Connection:
-    """Open a connection to the database, creating the base directory if needed."""
+    _DATE_FN_RE = re.compile(r"\bDATE\s*\(\s*([^()]+?)\s*\)", re.IGNORECASE)
+
+    def _translate(sql: str, has_params: bool) -> str:
+        """Rewrite SQLite SQL to its PostgreSQL equivalent.
+
+        * literal ``%`` is doubled so psycopg2 does not read it as a
+          placeholder (only when params will be bound),
+        * ``?`` positional placeholders become ``%s``,
+        * ``DATE(col)`` becomes ``(col)::date``.
+        """
+        q = sql
+        if has_params:
+            q = q.replace("%", "%%")
+        q = q.replace("?", "%s")
+        q = _DATE_FN_RE.sub(r"(\1)::date", q)
+        return q
+
+    class _PGResult:
+        """Cursor-like result exposing fetch* and a real ``lastrowid``."""
+
+        def __init__(self, cur, lastrowid=None):
+            self._cur = cur
+            self.lastrowid = lastrowid
+
+        def fetchone(self):
+            return self._cur.fetchone()
+
+        def fetchall(self):
+            return self._cur.fetchall()
+
+        def fetchmany(self, size=None):
+            return self._cur.fetchmany(size) if size else self._cur.fetchmany()
+
+        def __iter__(self):
+            return iter(self._cur)
+
+    class _PGCursor:
+        """Translating cursor wrapper — used by pandas.read_sql(sql, conn)."""
+
+        def __init__(self, cur):
+            self._cur = cur
+
+        def execute(self, sql, params=None):
+            self._cur.execute(_translate(sql, params is not None), params)
+            return self
+
+        def fetchone(self):
+            return self._cur.fetchone()
+
+        def fetchall(self):
+            return self._cur.fetchall()
+
+        def fetchmany(self, size=None):
+            return self._cur.fetchmany(size) if size else self._cur.fetchmany()
+
+        @property
+        def description(self):
+            return self._cur.description
+
+        @property
+        def rowcount(self):
+            return self._cur.rowcount
+
+        def close(self):
+            self._cur.close()
+
+        def __iter__(self):
+            return iter(self._cur)
+
+    class _PGConnection:
+        """sqlite3.Connection-compatible wrapper around a psycopg2 connection."""
+
+        def __init__(self):
+            self._conn = psycopg2.connect(DATABASE_URL)
+            self.row_factory = None
+
+        def execute(self, sql, params=()):
+            use_dict = bool(self.row_factory)
+            factory = psycopg2.extras.RealDictCursor if use_dict else None
+            cur = self._conn.cursor(cursor_factory=factory)
+            q = _translate(sql, params is not None)
+            is_insert = q.lstrip()[:6].upper() == "INSERT"
+            lastrowid = None
+            if is_insert and "RETURNING" not in q.upper():
+                try:
+                    cur.execute(q.rstrip().rstrip(";") + " RETURNING id", params)
+                    row = cur.fetchone()
+                    if row is not None:
+                        lastrowid = row["id"] if use_dict else row[0]
+                except psycopg2.Error:
+                    # Table without an "id" column — retry the plain statement.
+                    self._conn.rollback()
+                    cur = self._conn.cursor(cursor_factory=factory)
+                    cur.execute(q, params)
+            else:
+                cur.execute(q, params)
+            return _PGResult(cur, lastrowid)
+
+        def executescript(self, script):
+            cur = self._conn.cursor()
+            cur.execute(script)
+            cur.close()
+
+        def cursor(self):
+            return _PGCursor(self._conn.cursor())
+
+        def commit(self):
+            self._conn.commit()
+
+        def rollback(self):
+            self._conn.rollback()
+
+        def close(self):
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            if exc_type is None:
+                self._conn.commit()
+            else:
+                self._conn.rollback()
+            self.close()
+            return False
+
+
+def _connect():
+    """Open a database connection for the active backend.
+
+    Returns a psycopg2-backed wrapper when DATABASE_URL is set, otherwise a
+    plain ``sqlite3.Connection``. Both expose the same execute/commit/row_factory
+    surface used across the codebase.
+    """
+    if IS_POSTGRES:
+        return _PGConnection()
     os.makedirs(_BASE, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
@@ -132,8 +297,35 @@ def run_migrations(conn: sqlite3.Connection) -> None:
                 logger.error(f"[DB] Migração {version} falhou: {e}")
 
 
+_SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema.sql"
+_pg_init_done = False
+
+
+def _read_schema_sql() -> str:
+    """Return the contents of schema.sql (the PostgreSQL DDL source)."""
+    if not _SCHEMA_PATH.exists():
+        raise FileNotFoundError(f"schema.sql not found at {_SCHEMA_PATH}")
+    return _SCHEMA_PATH.read_text(encoding="utf-8")
+
+
+def _init_db_postgres() -> None:
+    """Create all tables on PostgreSQL from schema.sql. Idempotent."""
+    global _pg_init_done
+    if _pg_init_done:
+        return
+    with _connect() as conn:
+        conn.executescript(_read_schema_sql())
+        conn.commit()
+    ensure_default_portfolio()
+    _pg_init_done = True
+    logger.info("[DB] Schema PostgreSQL verificado/criado")
+
+
 def init_db() -> None:
     """Create all tables if they don't exist. Safe to call multiple times."""
+    if IS_POSTGRES:
+        _init_db_postgres()
+        return
     with _connect() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS signals (
