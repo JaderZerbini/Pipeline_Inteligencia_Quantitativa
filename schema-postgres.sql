@@ -17,21 +17,29 @@ CREATE TABLE IF NOT EXISTS signals (
 );
 
 CREATE TABLE IF NOT EXISTS audits (
-    id         SERIAL PRIMARY KEY,
-    signal_id  INTEGER REFERENCES signals(id),
-    model      TEXT,
-    score      INTEGER,
-    verdict    TEXT,
-    created_at TEXT
+    id           SERIAL PRIMARY KEY,
+    signal_id    INTEGER REFERENCES signals(id),
+    gemini_score INTEGER,
+    headline     TEXT,
+    source       TEXT,
+    verdict      TEXT,
+    raw_response TEXT,
+    created_at   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS operations (
-    id         SERIAL PRIMARY KEY,
-    ticker     TEXT,
-    action     TEXT,
-    price      REAL,
-    quantity   REAL,
-    created_at TEXT
+    id           SERIAL PRIMARY KEY,
+    signal_id    INTEGER REFERENCES signals(id),
+    ticker       TEXT NOT NULL,
+    entry_price  REAL,
+    entry_date   TEXT,
+    exit_price   REAL,
+    exit_date    TEXT,
+    stop_price   REAL,
+    status       TEXT CHECK(status IN ('OPEN','CLOSED','STOPPED')),
+    pnl_brl      REAL,
+    peak_price   REAL,
+    created_at   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS crypto_signals (
@@ -110,7 +118,9 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     opened_at     TEXT NOT NULL,
     closed_at     TEXT,
     pnl           REAL,
-    pnl_pct       REAL
+    pnl_pct       REAL,
+    close_price   REAL,
+    close_reason  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS schema_version (
