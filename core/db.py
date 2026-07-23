@@ -116,7 +116,19 @@ if IS_POSTGRES:
         """sqlite3.Connection-compatible wrapper around a psycopg2 connection."""
 
         def __init__(self):
-            self._conn = psycopg2.connect(DATABASE_URL)
+            try:
+                self._conn = psycopg2.connect(DATABASE_URL)
+            except psycopg2.OperationalError as exc:
+                # Causa mais comum em nuvem: DATABASE_URL aponta para o host
+                # direto db.<ref>.supabase.co, que só resolve IPv6. Ambientes
+                # sem IPv6 (Streamlit Cloud) precisam do Session pooler
+                # aws-*.pooler.supabase.com (IPv4). Ver .env e docs do Supabase.
+                raise RuntimeError(
+                    "Falha ao conectar no Postgres. Se o host for "
+                    "db.<ref>.supabase.co, troque DATABASE_URL pela string do "
+                    "Session pooler (aws-*.pooler.supabase.com:5432), que é IPv4. "
+                    f"Erro original: {exc}"
+                ) from exc
             self.row_factory = None
 
         def execute(self, sql, params=()):
