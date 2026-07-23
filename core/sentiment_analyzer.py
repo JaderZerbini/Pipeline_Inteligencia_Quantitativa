@@ -5,13 +5,13 @@ load_dotenv()  # must run before any os.getenv() calls
 
 import json
 import os
-import re
 import time
 import threading
 import concurrent.futures
 from google import genai
 from openai import OpenAI
 from core.db import save_audit
+from core.parsing import parse_audit_json
 
 _key = os.getenv("OPENROUTER_API_KEY")
 if not _key:
@@ -57,25 +57,9 @@ _FALLBACK_AUDIT: dict = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Shared JSON parser (used by all model response paths)
-# ---------------------------------------------------------------------------
-
-def _parse_gemini_json(text: str) -> dict:
-    """Strip markdown fences (if present) then parse and validate the JSON.
-
-    Works for both bare JSON and responses wrapped in ```json ... ``` blocks.
-    Raises on bad input — caller must handle and fall back.
-    """
-    text = text.strip()
-    text = re.sub(r'^```(?:json)?\s*', '', text)
-    text = re.sub(r'\s*```$', '', text)
-    result = json.loads(text)
-    if not {"score", "verdict", "reason", "flags"}.issubset(result):
-        raise ValueError(f"Campos obrigatórios ausentes: {list(result)}")
-    result["score"] = max(0, min(100, int(result["score"])))
-    result.setdefault("commodity_risk", "BAIXO")
-    return result
+# O parser tolerante vive em core/parsing.py (só stdlib) para os testes
+# exercitarem os casos "Extra data"/control-char/None sem arrastar SDKs no CI.
+_parse_gemini_json = parse_audit_json
 
 
 # ---------------------------------------------------------------------------
