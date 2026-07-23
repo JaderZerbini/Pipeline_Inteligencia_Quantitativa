@@ -1,0 +1,77 @@
+# .github/workflows/b3_pipeline.yml
+#
+# Roda o pipeline B3 (main.py) automaticamente a cada 30 min durante o pregão,
+# via GitHub Actions. Não requer servidor próprio.
+#
+# Janela do pregão B3: 10:00–17:00 BRT (UTC-3) = 13:00–20:00 UTC.
+#   cron "*/30 13-20 * * 1-5" → a cada 30 min, das 13h às 20h UTC, seg–sex.
+#   (O GitHub Actions usa SEMPRE horário UTC nos crons.)
+#
+# Persistência: os sinais são gravados no PostgreSQL do Supabase via DATABASE_URL.
+#
+# Configuração necessária (Settings → Secrets and variables → Actions):
+#   DATABASE_URL, OPENROUTER_API_KEY, GEMINI_API_KEY,
+#   TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+
+name: Pipeline B3
+
+on:
+  schedule:
+    - cron: "*/30 13-20 * * 1-5"   # a cada 30 min, pregão B3 (13–20 UTC, seg–sex)
+  workflow_dispatch:                # permite rodar manualmente
+
+jobs:
+  run_b3_pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      # 1. Baixar o código do repositório
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      # 2. Configurar Python
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: ""
+
+      - name: Verificar versão do Python
+        run: python --version
+
+      # 3. Instalar dependências
+      - name: Instalar dependências
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-actions.txt
+          pip uninstall -y google-generativeai || true
+          pip install --force-reinstall google-genai==1.74.0
+
+      # 4. Criar pasta de dados (logs locais do run)
+      - name: Criar pasta data/
+        run: mkdir -p data
+
+      # 5. Executar o pipeline B3
+      - name: Executar pipeline B3
+        env:
+          # Persistência PostgreSQL (Supabase)
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Chaves de API — configure em Settings → Secrets
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python main.py
+
+      # 6. Salvar log como artefato (visível na aba Actions por 7 dias)
+      - name: Salvar log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b3-log-${{ github.run_number }}
+          path: data/b3_pipeline.log
+          retention-days: 7
