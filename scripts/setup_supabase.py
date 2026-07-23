@@ -15,12 +15,13 @@ def setup():
         print("Execute: pip install psycopg2-binary")
         sys.exit(1)
 
+    # schema.sql é DDL de SQLite (AUTOINCREMENT); o Postgres usa schema-postgres.sql.
     schema_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "schema.sql"
+        "schema-postgres.sql"
     )
     if not os.path.exists(schema_path):
-        print(f"ERRO: schema.sql não encontrado em {schema_path}")
+        print(f"ERRO: schema-postgres.sql não encontrado em {schema_path}")
         sys.exit(1)
 
     with open(schema_path, "r", encoding="utf-8") as f:

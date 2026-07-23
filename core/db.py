@@ -309,14 +309,16 @@ def run_migrations(conn: sqlite3.Connection) -> None:
                 logger.error(f"[DB] Migração {version} falhou: {e}")
 
 
-_SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema.sql"
+# schema.sql usa sintaxe SQLite (AUTOINCREMENT); o Postgres precisa do DDL
+# equivalente com SERIAL — daí o arquivo separado schema-postgres.sql.
+_SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema-postgres.sql"
 _pg_init_done = False
 
 
 def _read_schema_sql() -> str:
-    """Return the contents of schema.sql (the PostgreSQL DDL source)."""
+    """Return the contents of schema-postgres.sql (the PostgreSQL DDL source)."""
     if not _SCHEMA_PATH.exists():
-        raise FileNotFoundError(f"schema.sql not found at {_SCHEMA_PATH}")
+        raise FileNotFoundError(f"schema-postgres.sql not found at {_SCHEMA_PATH}")
     return _SCHEMA_PATH.read_text(encoding="utf-8")
 
 
