@@ -27,6 +27,8 @@ Regras gerais (fonte da verdade):
 
 from unittest.mock import patch
 
+import pytest
+
 from crypto.decision import evaluate_signal
 
 _COOLDOWN = "crypto.decision.is_in_cooldown"
@@ -253,3 +255,65 @@ def test_forte_suppressed_in_cooldown():
     with patch(_COOLDOWN, return_value=True), patch(_REGISTER):
         result = evaluate_signal(_signal(30, 55, change=-4.0), call_ai=False)
     assert result["decision"] == "AGUARDAR"
+
+
+# ---------------------------------------------------------------------------
+# Invariante de segurança: BLOQUEADO não é negociável
+# ---------------------------------------------------------------------------
+
+def test_bloqueio_nao_e_negociavel_por_score_alto():
+    """MANIPULACAO bloqueia mesmo com score máximo e indicadores perfeitos.
+
+    Trava o invariante do CLAUDE.md: nenhum gate posterior pode sobrescrever o
+    bloqueio. Fraude é categórica, não uma penalidade que outra métrica compense.
+    """
+    with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
+         patch(_AI_CALL, return_value={"score": 100, "veredicto": "MANIPULACAO",
+                                       "razao": "pump detectado"}):
+        result = evaluate_signal(_signal(28, 60, change=-5.0), call_ai=True)
+    assert result["decision"] == "BLOQUEADO"
+
+
+@pytest.mark.parametrize("veredicto", ["MANIPULACAO", "PUMP", "FUD_COORDENADO"])
+def test_todos_veredictos_de_manipulacao_bloqueiam(veredicto):
+    with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
+         patch(_AI_CALL, return_value={"score": 95, "veredicto": veredicto,
+                                       "razao": "x"}):
+        result = evaluate_signal(_signal(28, 60, change=-5.0), call_ai=True)
+    assert result["decision"] == "BLOQUEADO"
+
+
+# ---------------------------------------------------------------------------
+# Economia de tokens: não chamar IA em sinal que já não pode passar
+# ---------------------------------------------------------------------------
+
+def test_nao_chama_ia_quando_rsi_inviabiliza_sinal():
+    """RSI=52 em uptrend (moderado exige <=40) não pode virar sinal.
+
+    Chamar 3 LLMs para um par matematicamente reprovado é desperdicio puro:
+    os dois ramos (FORTE/MODERADO) exigem rsi <= threshold, então nenhum
+    ai_score resgata. Observado em producao: os 4 pares gastavam IA com zero
+    chance de sinal.
+    """
+    with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
+         patch(_AI_CALL) as mock_ai:
+        result = evaluate_signal(_signal(52, 60), call_ai=True)
+    mock_ai.assert_not_called()
+    assert result["decision"] == "AGUARDAR"
+
+
+def test_chama_ia_quando_rsi_viabiliza_sinal():
+    """RSI=38 (<=40) pode virar MODERADO — a IA precisa ser consultada."""
+    with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
+         patch(_AI_CALL, return_value={"score": 70, "veredicto": "CONFIAVEL",
+                                       "razao": "ok"}) as mock_ai:
+        evaluate_signal(_signal(38, 50), call_ai=True)
+    mock_ai.assert_called_once()
+
+
+def test_pre_gate_respeita_threshold_dinamico_de_downtrend():
+    """Em downtrend o moderado exige RSI<=30; RSI=38 passaria em uptrend."""
+    with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
+         patch(_AI_CALL) as mock_ai:
+        evaluate_signal(_signal(38, 60, hist_trend="downtrend"), call_ai=True)
+    mock_ai.assert_not_called()

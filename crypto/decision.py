@@ -178,6 +178,23 @@ def evaluate_signal(
         effective_rsi_moderate = 37
         ai_score_min_override  = STRONG_AI_SCORE_MIN + 5  # exige 70
 
+    # --- Passo 1c: Pré-gate de RSI — evita gastar IA em sinal já reprovado ---
+    #
+    # Os dois ramos de decisão abaixo (FORTE e MODERADO) exigem
+    # rsi <= effective_rsi_*, e o mais folgado dos dois é o moderado. Se o RSI
+    # já não cabe nem nele, nenhum ai_score resgata o sinal — os gates são
+    # conjuntivos. Chamar 3 LLMs aqui seria desperdício garantido.
+    #
+    # Seguro por direção: pular a IA só nos leva a AGUARDAR, nunca a comprar.
+    # Perdemos a detecção de manipulação neste par, mas também não há capital
+    # exposto — e não comprar é sempre o lado seguro do erro.
+    if rsi > effective_rsi_moderate:
+        reasons.append(
+            f"RSI={rsi:.2f} acima do limite moderado "
+            f"({effective_rsi_moderate}) — IA não consultada"
+        )
+        return _make_result(symbol, "AGUARDAR", ai_score, ai_veredicto, reasons)
+
     # --- Passo 2: Consenso das IAs (só se indicadores básicos estão ok) ---
 
     if call_ai:
