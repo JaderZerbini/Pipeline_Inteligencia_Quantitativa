@@ -16,6 +16,7 @@ Uso:
 
 import argparse
 import logging
+import os
 import sys
 import time
 
@@ -29,7 +30,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BINANCE_BASE = "https://api.binance.com/api/v3"
+# Mirror público de market data — evita o HTTP 451 (geobloqueio) de api.binance.com.
+BINANCE_BASE = os.getenv("BINANCE_BASE", "https://data-api.binance.vision/api/v3")
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]
 TRAILING_STOP_PCT = 0.07
 INITIAL_CAPITAL = 5000.0

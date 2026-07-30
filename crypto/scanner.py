@@ -64,7 +64,10 @@ COINGECKO_MAP = {
     "SOLUSDT": "solana",
 }
 
-BINANCE_BASE = "https://api.binance.com/api/v3"
+# data-api.binance.vision é o mirror público de market data: mesmos endpoints,
+# sem chave e sem o geobloqueio (HTTP 451) que api.binance.com aplica a IPs dos
+# EUA — onde rodam os runners do GitHub Actions.
+BINANCE_BASE = os.getenv("BINANCE_BASE", "https://data-api.binance.vision/api/v3")
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
 
