@@ -17,8 +17,9 @@ a notícia confirma ou contradiz o que o preço já mostra.
 # disso.
 _IMPACT_INSTRUCTION = (
     "Além do score, devolva 'impact': a direção e a força esperadas no preço, "
-    "de -100 (forte pressão de queda) a +100 (forte pressão de alta), com 0 "
-    "para neutro ou indeterminado.\n"
+    "como um inteiro entre -100 (forte pressão de queda) e 100 (forte pressão "
+    "de alta), com 0 para neutro ou indeterminado. Não escreva sinal de mais: "
+    "use 60, nunca +60 — JSON com sinal positivo é inválido.\n"
     "'impact' e 'score' medem coisas diferentes e NÃO devem ser iguais: "
     "'score' é credibilidade (dá para confiar nesta informação?), 'impact' é "
     "direção (para onde o preço tende?). Uma notícia muito crível de conteúdo "
@@ -114,7 +115,7 @@ def build_b3_audit_prompt(
     blocks.append(_IMPACT_INSTRUCTION)
     blocks.append(
         "Retorne exatamente:\n"
-        '{"score": <0-100>, "impact": <-100 a +100>, '
+        '{"score": <0-100>, "impact": <inteiro de -100 a 100>, '
         '"verdict": "<CONFIAVEL|RUIDO|MANIPULACAO>", '
         '"reason": "<uma frase sobre o impacto no ativo>", '
         '"commodity_risk": "<ALTO|MEDIO|BAIXO>", '
@@ -231,7 +232,7 @@ def build_crypto_audit_prompt(
     blocks.append(_IMPACT_INSTRUCTION)
     blocks.append(
         'Responda SOMENTE com JSON: '
-        '{"score": 0-100, "impact": -100 a +100, '
+        '{"score": 0-100, "impact": inteiro de -100 a 100, '
         '"verdict": "CONFIAVEL|RUIDO|MANIPULACAO|PUMP|FUD_COORDENADO", '
         '"reason": "uma frase curta", "flags": []}'
     )

@@ -114,3 +114,44 @@ def test_commodity_risk_preservado_quando_presente():
     raw = ('{"score": 80, "verdict": "CONFIAVEL", "reason": "x", '
            '"flags": [], "commodity_risk": "ALTO"}')
     assert parse_audit_json(raw)["commodity_risk"] == "ALTO"
+
+
+# ---------------------------------------------------------------------------
+# Numero com sinal `+` explicito (regressao do release 3a)
+# ---------------------------------------------------------------------------
+
+_TAIL = '"verdict": "CONFIAVEL", "reason": "x", "flags": []'
+
+
+def test_tolera_mais_explicito_em_numero():
+    """JSON nao permite `+60`, mas o llama-3.3-70b emite exatamente isso.
+
+    Regressao observada: ao pedir "impact": <-100 a +100>, o modelo copiou o
+    sinal do enunciado e derrubou o proprio voto no consenso (peso 0.40) com
+    JSONDecodeError. Perder um voto degrada a deteccao de manipulacao.
+    """
+    out = parse_audit_json('{"score": 82, "impact": +60, ' + _TAIL + '}')
+    assert out["impact"] == 60
+    assert out["score"] == 82
+
+
+def test_negativo_continua_funcionando():
+    out = parse_audit_json('{"score": 63, "impact": -56, ' + _TAIL + '}')
+    assert out["impact"] == -56
+
+
+def test_tolera_mais_em_float():
+    out = extract_json_object('{"impact": +12.5}')
+    assert out["impact"] == 12.5
+
+
+def test_tolera_mais_em_lista():
+    out = extract_json_object('{"v": [+1, -2, +3]}')
+    assert out["v"] == [1, -2, 3]
+
+
+def test_nao_corrompe_mais_dentro_de_string():
+    """`+` em texto livre nao pode ser tocado, mesmo quando o objeto quebra."""
+    out = extract_json_object('{"reason": "alta de +5% no tri", "impact": +7}')
+    assert out["reason"] == "alta de +5% no tri"
+    assert out["impact"] == 7

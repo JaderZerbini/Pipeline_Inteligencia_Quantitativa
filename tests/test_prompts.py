@@ -100,16 +100,18 @@ def test_isola_manipulacao_de_timing_desfavoravel():
     """
     p = build_b3_audit_prompt(HEADLINE, TICKER, INDICATORS)
     assert "MANIPULACAO" in p
-    low = p.lower()
-    assert "credibilidade" in low
-    # a instrução de não usar MANIPULACAO para timing precisa estar presente
-    assert "nunca" in low
+    assert "credibilidade" in p.lower()
+    # A instrução de não usar MANIPULACAO para timing precisa estar presente.
+    # Assertar o texto do guard, não a palavra "nunca" solta: ela também
+    # aparece na instrução de `impact` ("nunca +60"), o que tornaria este
+    # teste e o seguinte ambíguos.
+    assert "NUNCA justificam" in p
 
 
 def test_guard_ausente_quando_nao_ha_indicadores():
     """Sem indicadores não existe risco de confundir timing com manipulação."""
-    p = build_b3_audit_prompt(HEADLINE, TICKER).lower()
-    assert "nunca" not in p
+    p = build_b3_audit_prompt(HEADLINE, TICKER)
+    assert "NUNCA justificam" not in p
 
 
 # ===========================================================================
@@ -183,9 +185,10 @@ def test_cripto_mantem_guard_de_volume_social_zero():
 def test_cripto_isola_manipulacao_de_timing():
     """Mesma regressão do B3: MANIPULACAO dispara BLOQUEADO irrevogável."""
     p = build_crypto_audit_prompt(SIGNAL, news=CRYPTO_NEWS, macro=CRYPTO_MACRO)
-    low = p.lower()
-    assert "nunca" in low
-    assert "credibilidade" in low
+    # Texto do guard, não a palavra "nunca" solta — ela também aparece na
+    # instrução de `impact`, o que tornaria a asserção ambígua.
+    assert "NUNCA justificam" in p
+    assert "credibilidade" in p.lower()
 
 
 @pytest.mark.parametrize("veredicto", [
