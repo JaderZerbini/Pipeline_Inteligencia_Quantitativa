@@ -12,6 +12,7 @@ from google import genai
 from openai import OpenAI
 from core.db import save_audit
 from core.parsing import parse_audit_json
+from core.prompts import build_b3_audit_prompt
 
 _key = os.getenv("OPENROUTER_API_KEY")
 if not _key:
@@ -309,7 +310,12 @@ def analyze_crypto(prompt: str) -> dict:
     return dict(_FALLBACK_AUDIT)
 
 
-def analyze_news(headline: str, ticker: str, signal_id: int | None = None) -> dict:
+def analyze_news(
+    headline: str,
+    ticker: str,
+    signal_id: int | None = None,
+    indicators: dict | None = None,
+) -> dict:
     """Audit a news headline via multi-model consensus with Gemini fallback.
 
     Execution order:
@@ -323,6 +329,10 @@ def analyze_news(headline: str, ticker: str, signal_id: int | None = None) -> di
         ticker:    Stock ticker for prompt context (e.g. 'PETR4').
         signal_id: When provided, persists the result to the DB via
                    ``save_audit()``, linked to this signal row.
+        indicators: Optional technical context (price, rsi, volume_ratio,
+                   pct_from_ma200, hist_trend). When supplied, the model is
+                   asked whether the headline confirms or contradicts what the
+                   numbers already show, instead of judging the news alone.
 
     Returns:
         Dict with keys: score, verdict, reason, flags, and (on consensus path)
@@ -340,19 +350,7 @@ def analyze_news(headline: str, ticker: str, signal_id: int | None = None) -> di
             _persist(signal_id, result, headline or "")
         return result
 
-    prompt = f"""Você é um analista financeiro especializado em B3 e cadeias de suprimentos globais.
-
-Analise as seguintes manchetes recentes sobre fatores que impactam o ativo {ticker} e retorne APENAS JSON válido.
-
-Manchetes: "{headline}"
-
-Considere impactos INDIRETOS: guerras afetam commodities, que afetam margens das empresas. Eventos climáticos afetam oferta de matérias-primas. Decisões de bancos centrais afetam custo de capital.
-
-Retorne exatamente:
-{{"score": <0-100>, "verdict": "<CONFIAVEL|RUIDO|MANIPULACAO>", "reason": "<uma frase sobre o impacto no ativo>", "commodity_risk": "<ALTO|MEDIO|BAIXO>", "flags": [<lista de fatores de risco identificados>]}}
-
-Score: 70-100=notícia fundamentada com impacto claro no ativo, 40-69=impacto indireto ou incerto, 0-39=sem relação ou manipulação.
-Responda SOMENTE com o JSON."""
+    prompt = build_b3_audit_prompt(headline, ticker, indicators)
 
     # --- Primary: OpenRouter multi-model consensus ---
     if os.getenv("OPENROUTER_API_KEY"):

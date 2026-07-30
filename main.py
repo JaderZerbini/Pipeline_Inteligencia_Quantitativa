@@ -45,10 +45,11 @@ def _run_audit(
     signal_id: int,
     result: dict,
     event: threading.Event,
+    indicators: dict | None = None,
 ) -> None:
     """Thread target: call Gemini, store result, set event to unblock caller."""
     try:
-        result["audit"] = analyze_news(headline, ticker, signal_id)
+        result["audit"] = analyze_news(headline, ticker, signal_id, indicators)
     except Exception:
         result["audit"] = dict(_FALLBACK_AUDIT)
     finally:
@@ -110,12 +111,23 @@ def orquestrar_investimento() -> list[dict]:
         logger.info(f"[{ticker}] Buscando notícias...")
         headline = buscar_noticias_ticker(ticker)
 
+        # PASSO 2c: Indicadores técnicos que acompanham a manchete até a IA.
+        # Sem eles a IA julga a notícia no vácuo — não sabe se o ativo já está
+        # esticado ou sobrevendido, então não consegue pesar a margem de alta.
+        indicators = {
+            "price":          row.get("Preço"),
+            "rsi":            row.get("RSI"),
+            "volume_ratio":   row.get("volume_ratio"),
+            "pct_from_ma200": row.get("pct_from_ma200"),
+            "hist_trend":     row.get("hist_trend"),
+        }
+
         # PASSO 3: Auditoria Gemini em thread daemon — bloqueia até 12s ou até responder
         audit_result: dict = {}
         event = threading.Event()
         thread = threading.Thread(
             target=_run_audit,
-            args=(headline, ticker, signal_id, audit_result, event),
+            args=(headline, ticker, signal_id, audit_result, event, indicators),
             daemon=True,
         )
         t_start = time.time()
