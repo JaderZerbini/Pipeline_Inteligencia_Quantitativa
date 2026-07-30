@@ -21,6 +21,7 @@ import threading
 from datetime import datetime, timezone
 
 from core.db import is_in_cooldown, register_cooldown
+from core.prompts import build_crypto_audit_prompt  # stdlib-only: seguro no topo
 
 logger = logging.getLogger(__name__)
 
@@ -50,36 +51,21 @@ AI_TIMEOUT_SECONDS = 25
 # Análise de sentimento via IAs (reutiliza sentiment_analyzer.py)
 # ---------------------------------------------------------------------------
 
-def _build_crypto_prompt(signal: dict) -> str:
-    """Constrói o prompt de dados enviado às IAs (contexto vem do system message)."""
-    social_vol = signal.get("social_volume_24h", 0) or 0
-    social_note = (
-        "Nota: volume social é proxy de comunidade (seguidores Twitter+Reddit), "
-        "NÃO volume de negociação. Zero indica dado indisponível, não manipulação."
-    )
-    return (
-        f"Ativo: {signal['symbol']}\n"
-        f"Preço: ${signal['price']:,.2f}\n"
-        f"Variação 24h: {signal.get('change_pct_24h', 0):+.2f}%\n"
-        f"RSI(1h): {signal.get('rsi_1h', 'N/A')}\n"
-        f"Galaxy Score: {signal.get('galaxy_score', 'N/A')} / 100\n"
-        f"Volume social (proxy comunidade): {social_vol:,}\n"
-        f"{social_note}\n"
-        f"Sentimento: {signal.get('sentiment', 'unknown')}\n\n"
-        "IMPORTANTE: volume social zero NÃO é evidência de manipulação — "
-        "indica apenas que dados de comunidade não estão disponíveis. "
-        "Baseie a avaliação de manipulação APENAS em padrões de preço "
-        "(pump súbito, dump rápido, variação >20% em 1h).\n\n"
-        'Responda SOMENTE com JSON: '
-        '{"score": 0-100, "verdict": "CONFIAVEL|RUIDO|MANIPULACAO|PUMP|FUD_COORDENADO", '
-        '"reason": "uma frase curta", "flags": []}'
-    )
+# O prompt vive em core/prompts.py (stdlib-only, testável sem arrastar SDKs
+# de IA para o CI) — mesmo motivo de core/parsing.py existir.
 
 
-def _get_ai_consensus(signal: dict) -> dict:
+def _get_ai_consensus(
+    signal: dict,
+    news: str | None = None,
+    macro: dict | None = None,
+) -> dict:
     """
     Chama o run_consensus do sentiment_analyzer.py existente.
     Usa threading para respeitar o timeout sem bloquear o pipeline.
+
+    news/macro são opcionais e vêm prontos do crypto_main.py — a busca não
+    acontece aqui para manter este módulo leve de imports (ver CLAUDE.md).
     """
     result = {"score": 50, "veredicto": "RUIDO", "razao": "timeout ou erro"}
     event = threading.Event()
@@ -88,7 +74,7 @@ def _get_ai_consensus(signal: dict) -> dict:
         nonlocal result
         try:
             from core.sentiment_analyzer import analyze_crypto  # lazy: evita importar SDKs de IA na coleta
-            prompt = _build_crypto_prompt(signal)
+            prompt = build_crypto_audit_prompt(signal, news=news, macro=macro)
             consensus = analyze_crypto(prompt)
             if consensus:
                 result = {
@@ -112,13 +98,24 @@ def _get_ai_consensus(signal: dict) -> dict:
 # Motor de decisão principal
 # ---------------------------------------------------------------------------
 
-def evaluate_signal(signal: dict, call_ai: bool = True) -> dict:
+def evaluate_signal(
+    signal: dict,
+    call_ai: bool = True,
+    news: str | None = None,
+    macro: dict | None = None,
+) -> dict:
     """
     Avalia um sinal do crypto_scanner.py e retorna veredicto com justificativa.
 
     Parâmetros:
         signal   — dicionário retornado pelo scan_crypto()
         call_ai  — se False, pula a chamada às IAs (útil para backtesting)
+        news     — manchetes já coletadas (crypto/news_fetcher.py). Opcional:
+                   sem elas a IA julga o sinal só pelos números, como antes.
+        macro    — snapshot macro (core.macro_monitor.crypto_macro_snapshot()).
+                   Buscar aqui traria feedparser/yfinance para o topo deste
+                   módulo e quebraria a coleta de testes no CI — por isso vêm
+                   prontos do crypto_main.py.
 
     Retorna:
         {
@@ -185,7 +182,7 @@ def evaluate_signal(signal: dict, call_ai: bool = True) -> dict:
 
     if call_ai:
         logger.info(f"[DECISION] {symbol}: chamando IAs...")
-        ai_result = _get_ai_consensus(signal)
+        ai_result = _get_ai_consensus(signal, news=news, macro=macro)
         ai_score = ai_result.get("score", 50)
         ai_veredicto = ai_result.get("veredicto", "RUIDO")
         razao = ai_result.get("razao", "")

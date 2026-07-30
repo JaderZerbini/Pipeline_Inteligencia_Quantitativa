@@ -151,9 +151,32 @@ def run_pipeline(dry_run: bool = False) -> None:
     actionable = []
     report_rows = []
 
+    # Contexto macro: um snapshot por ciclo, compartilhado por todos os pares
+    # (cripto se move junto — DXY e apetite por risco valem para o mercado todo).
+    crypto_macro = {}
+    if not dry_run:
+        try:
+            from core.macro_monitor import crypto_macro_snapshot
+            crypto_macro = crypto_macro_snapshot()
+            logger.info(f"[MACRO] {len(crypto_macro)} indicadores coletados")
+        except Exception as e:
+            logger.warning(f"[MACRO] indisponível: {e}")
+
     for signal in signals:
+        # Manchetes por par — sem elas a IA não sabe que Fed, ETF ou halving
+        # existem e julga o sinal apenas pelos números.
+        news = None
+        if not dry_run:
+            try:
+                from crypto.news_fetcher import buscar_noticias_cripto
+                news = buscar_noticias_cripto(signal["symbol"])
+            except Exception as e:
+                logger.warning(f"[NEWS] {signal['symbol']}: {e}")
+
         # dry-run pula chamadas de IA (mais rápido + sem custo de API)
-        result = evaluate_signal(signal, call_ai=not dry_run)
+        result = evaluate_signal(
+            signal, call_ai=not dry_run, news=news, macro=crypto_macro
+        )
 
         row = (
             f"  {signal['symbol']:<10} "

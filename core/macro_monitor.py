@@ -23,6 +23,20 @@ MACRO_DEPENDENCIES = {
 _cache: dict = {"snapshot": None, "fetched_at": None}
 CACHE_MINUTES = 15
 
+# Subconjunto do snapshot que interessa ao cripto. Brent e minério movem ação de
+# commodity; cripto responde à força do dólar e ao apetite por risco.
+CRYPTO_MACRO_KEYS = ("dxy", "gold", "spx")
+
+
+def crypto_macro_snapshot() -> dict:
+    """Retorna só os indicadores macro relevantes para cripto.
+
+    Reaproveita o cache de ``fetch_macro_snapshot()`` — chamar os dois no mesmo
+    ciclo não duplica requisições.
+    """
+    snapshot = fetch_macro_snapshot()
+    return {k: snapshot.get(k) for k in CRYPTO_MACRO_KEYS if snapshot.get(k)}
+
 
 def fetch_macro_snapshot() -> dict:
     """Fetch live macro indicators, returning a cached copy when fresh enough."""
@@ -37,6 +51,11 @@ def fetch_macro_snapshot() -> dict:
         "iron_ore":  "VALE3.SA",   # proxy: VALE tracks iron ore closely; TIO=F delisted
         "china_etf": "FXI",
         "usdbrl":    "USDBRL=X",
+        # Crypto-relevant: dollar strength and risk-on/risk-off appetite.
+        # Crypto ignores brent/iron ore but tracks DXY and equities closely.
+        "dxy":       "DX-Y.NYB",
+        "gold":      "GC=F",
+        "spx":       "^GSPC",
     }
     for key, symbol in tickers.items():
         try:

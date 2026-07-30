@@ -109,3 +109,112 @@ def build_b3_audit_prompt(
     )
 
     return "\n\n".join(blocks)
+
+
+# ---------------------------------------------------------------------------
+# Cripto
+# ---------------------------------------------------------------------------
+
+# Indicadores macro relevantes para cripto: risk-on/risk-off e força do dólar.
+# Nada de brent/minério — aquilo move ação de commodity, não BTC.
+_MACRO_LABELS: dict[str, str] = {
+    "dxy":  "DXY (índice do dólar)",
+    "gold": "Ouro",
+    "spx":  "S&P 500",
+}
+
+
+def _format_macro(macro: dict) -> str:
+    """Renderiza o snapshot macro como linhas legíveis, tolerando None."""
+    lines = []
+    for key, label in _MACRO_LABELS.items():
+        entry = macro.get(key)
+        if not entry:
+            continue
+        price = entry.get("price")
+        change = entry.get("change_pct")
+        parts = [f"- {label}: {price}"]
+        if change is not None:
+            parts.append(f"({change:+.1f}% 24h)")
+        lines.append(" ".join(parts))
+    return "\n".join(lines)
+
+
+def build_crypto_audit_prompt(
+    signal: dict,
+    news: str | None = None,
+    macro: dict | None = None,
+) -> str:
+    """Monta o prompt de auditoria de um sinal de cripto.
+
+    Args:
+        signal: Saída do crypto/scanner. Usa symbol, price, change_pct_24h,
+                rsi_1h, galaxy_score, social_volume_24h e sentiment.
+        news:   Opcional. String de manchetes já formatada pelo news_fetcher.
+        macro:  Opcional. Snapshot com as chaves dxy/gold/spx.
+
+    Returns:
+        O prompt completo com o contrato JSON que crypto/decision.py consome.
+    """
+    def _fmt(key: str, fmt: str = "{}") -> str:
+        value = signal.get(key)
+        if value is None:
+            return "N/A"
+        try:
+            return fmt.format(value)
+        except (TypeError, ValueError):
+            return str(value)
+
+    social_vol = signal.get("social_volume_24h") or 0
+
+    blocks = [
+        f"Ativo: {signal.get('symbol', 'N/A')}\n"
+        f"Preço: ${_fmt('price', '{:,.2f}')}\n"
+        f"Variação 24h: {_fmt('change_pct_24h', '{:+.2f}')}%\n"
+        f"RSI(1h): {_fmt('rsi_1h')}\n"
+        f"Galaxy Score: {_fmt('galaxy_score')} / 100\n"
+        f"Volume social (proxy comunidade): {social_vol:,}\n"
+        f"Sentimento: {signal.get('sentiment', 'unknown')}",
+
+        "Nota: volume social é proxy de comunidade (seguidores Twitter+Reddit), "
+        "NÃO volume de negociação. Zero indica dado indisponível, não "
+        "manipulação. Volume social zero NÃO é evidência de manipulação. "
+        "Baseie a avaliação de manipulação APENAS em padrões de preço "
+        "(pump súbito, dump rápido, variação >20% em 1h).",
+    ]
+
+    if macro:
+        rendered = _format_macro(macro)
+        if rendered:
+            blocks.append(
+                "Contexto macro (cripto responde a risk-on/risk-off e à força "
+                f"do dólar):\n{rendered}"
+            )
+
+    if news:
+        blocks.append(news)
+        blocks.append(
+            "As manchetes CONFIRMAM, CONTRADIZEM ou são IRRELEVANTES frente "
+            "aos indicadores acima? Notícia positiva com RSI já alto tem menos "
+            "margem de alta do que a mesma notícia com o ativo sobrevendido. "
+            "Considere essa relação no score."
+        )
+        # Mesmo guard do B3: sem isto o modelo usa MANIPULACAO para dizer
+        # "timing ruim", e isso dispara BLOQUEADO irrevogável no engine.
+        blocks.append(
+            "ATENÇÃO ao separar os eixos: 'verdict' avalia APENAS a "
+            "credibilidade do sinal e da notícia. Indicadores ou macro "
+            "desfavoráveis devem reduzir o 'score', mas NUNCA justificam "
+            "MANIPULACAO, PUMP ou FUD_COORDENADO — esses exigem evidência de "
+            "manipulação real (pump coordenado, fonte duvidosa, dump súbito). "
+            "Sinal legítimo com timing ruim é CONFIAVEL ou RUIDO com score baixo."
+        )
+
+    blocks.append(
+        'Responda SOMENTE com JSON: '
+        '{"score": 0-100, '
+        '"verdict": "CONFIAVEL|RUIDO|MANIPULACAO|PUMP|FUD_COORDENADO", '
+        '"reason": "uma frase curta", "flags": []}'
+    )
+
+    return "\n\n".join(blocks)

@@ -8,7 +8,7 @@ números mostram. Estes testes travam esse contrato.
 
 import pytest
 
-from core.prompts import build_b3_audit_prompt
+from core.prompts import build_b3_audit_prompt, build_crypto_audit_prompt
 
 
 HEADLINE = "Petrobras anuncia aumento de dividendos acima do esperado"
@@ -110,3 +110,101 @@ def test_guard_ausente_quando_nao_ha_indicadores():
     """Sem indicadores não existe risco de confundir timing com manipulação."""
     p = build_b3_audit_prompt(HEADLINE, TICKER).lower()
     assert "nunca" not in p
+
+
+# ===========================================================================
+# Cripto — o prompt era puramente numerico: nenhuma noticia, nenhum macro.
+# ===========================================================================
+
+SIGNAL = {
+    "symbol": "BTCUSDT",
+    "price": 63974.89,
+    "change_pct_24h": -0.52,
+    "rsi_1h": 40.62,
+    "galaxy_score": 51,
+    "social_volume_24h": 0,
+    "sentiment": "neutral",
+}
+
+CRYPTO_NEWS = (
+    "MANCHETES RECENTES: ETF de Bitcoin registra entrada recorde | "
+    "Fed sinaliza corte de juros em setembro"
+)
+
+CRYPTO_MACRO = {
+    "dxy": {"price": 103.4, "change_pct": -0.6},
+    "gold": {"price": 2410.0, "change_pct": 0.3},
+    "spx": {"price": 5620.0, "change_pct": 0.8},
+}
+
+
+def test_cripto_preserva_campos_numericos():
+    """Os 6 campos que já iam para a IA não podem desaparecer."""
+    p = build_crypto_audit_prompt(SIGNAL)
+    assert "BTCUSDT" in p
+    assert "63,974.89" in p or "63974.89" in p
+    assert "-0.52" in p
+    assert "40.62" in p
+    assert "51" in p
+    assert "neutral" in p
+
+
+def test_cripto_sem_noticias_nem_macro_nao_injeta_blocos():
+    p = build_crypto_audit_prompt(SIGNAL)
+    assert "MANCHETES" not in p
+    assert "Contexto macro" not in p
+
+
+def test_cripto_injeta_noticias():
+    p = build_crypto_audit_prompt(SIGNAL, news=CRYPTO_NEWS)
+    assert "ETF de Bitcoin" in p
+    assert "Fed sinaliza" in p
+
+
+def test_cripto_injeta_macro():
+    p = build_crypto_audit_prompt(SIGNAL, macro=CRYPTO_MACRO)
+    assert "103.4" in p          # DXY
+    assert "-0.6" in p           # variação do DXY
+    assert "spx" in p.lower() or "S&P" in p
+
+
+def test_cripto_pede_relacao_noticia_versus_numeros():
+    p = build_crypto_audit_prompt(SIGNAL, news=CRYPTO_NEWS).lower()
+    assert "confirma" in p
+    assert "contradiz" in p
+
+
+def test_cripto_mantem_guard_de_volume_social_zero():
+    """Guard antigo e valioso: volume social zero != manipulação."""
+    p = build_crypto_audit_prompt(SIGNAL)
+    assert "não é evidência de manipulação" in p.lower() or "nao e evidencia" in p.lower()
+
+
+def test_cripto_isola_manipulacao_de_timing():
+    """Mesma regressão do B3: MANIPULACAO dispara BLOQUEADO irrevogável."""
+    p = build_crypto_audit_prompt(SIGNAL, news=CRYPTO_NEWS, macro=CRYPTO_MACRO)
+    low = p.lower()
+    assert "nunca" in low
+    assert "credibilidade" in low
+
+
+@pytest.mark.parametrize("veredicto", [
+    "CONFIAVEL", "RUIDO", "MANIPULACAO", "PUMP", "FUD_COORDENADO",
+])
+def test_cripto_veredictos_preservados(veredicto):
+    """crypto/decision.py bloqueia em MANIPULACAO/PUMP/FUD_COORDENADO."""
+    p = build_crypto_audit_prompt(SIGNAL, news=CRYPTO_NEWS)
+    assert veredicto in p
+
+
+def test_cripto_contrato_json_preservado():
+    p = build_crypto_audit_prompt(SIGNAL)
+    for campo in ("score", "verdict", "reason", "flags"):
+        assert campo in p
+
+
+def test_cripto_campos_ausentes_nao_quebram():
+    """Scanner pode falhar no galaxy/RSI — não pode dar KeyError."""
+    p = build_crypto_audit_prompt({"symbol": "SOLUSDT", "price": 73.5})
+    assert "SOLUSDT" in p
+    assert "N/A" in p
