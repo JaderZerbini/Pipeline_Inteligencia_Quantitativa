@@ -208,3 +208,50 @@ def test_cripto_campos_ausentes_nao_quebram():
     p = build_crypto_audit_prompt({"symbol": "SOLUSDT", "price": 73.5})
     assert "SOLUSDT" in p
     assert "N/A" in p
+
+
+# ===========================================================================
+# Release 3a: campo `impact` — direcional, coletado sem ser consumido
+# ===========================================================================
+#
+# O `score` responde "esse sinal e confiavel?". Nao existe canal para "essa
+# noticia e altista ou baixista?", entao noticia boa nao consegue virar score
+# alto. `impact` abre esse eixo. Nesta etapa ele e apenas COLETADO — nenhum
+# gate le o valor — para haver dados reais antes de calibrar threshold.
+
+def test_b3_pede_impact_no_contrato():
+    """Assertar a chave JSON entre aspas: o prompt do B3 ja contem a palavra
+    'impacto' em prosa, entao `"impact" in p` passaria por acidente."""
+    p = build_b3_audit_prompt(HEADLINE, TICKER, INDICATORS)
+    assert '"impact"' in p
+
+
+def test_cripto_pede_impact_no_contrato():
+    p = build_crypto_audit_prompt(SIGNAL, news=CRYPTO_NEWS)
+    assert '"impact"' in p
+
+
+@pytest.mark.parametrize("builder,args", [
+    (build_b3_audit_prompt, (HEADLINE, TICKER, INDICATORS)),
+    (build_crypto_audit_prompt, (SIGNAL,)),
+])
+def test_impact_tem_escala_explicita_e_bidirecional(builder, args):
+    """A escala precisa deixar claro que negativo = baixista.
+
+    Sem isso o modelo devolve 0-100 como o score e os dois eixos colapsam de
+    novo — que e exatamente o problema que `impact` existe para resolver.
+    """
+    p = builder(*args)
+    assert "-100" in p
+    assert "+100" in p or "100" in p
+
+
+@pytest.mark.parametrize("builder,args", [
+    (build_b3_audit_prompt, (HEADLINE, TICKER, INDICATORS)),
+    (build_crypto_audit_prompt, (SIGNAL,)),
+])
+def test_impact_separado_de_credibilidade(builder, args):
+    """O prompt deve dizer que impact NAO mede credibilidade."""
+    p = builder(*args)
+    assert '"impact"' in p
+    assert "credibilidade" in p.lower()

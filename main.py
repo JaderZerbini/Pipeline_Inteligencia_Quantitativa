@@ -164,17 +164,24 @@ def orquestrar_investimento() -> list[dict]:
                     (f for f in audit.get("flags", []) if f.startswith("CONSENSUS:")),
                     None,
                 )
+                # impact é coletado, não consumido (3a) — logado para revisão
+                impact_str = (
+                    f" | impact={audit['impact']:+d}"
+                    if isinstance(audit.get("impact"), int)
+                    else " | impact=n/d"
+                )
                 if consensus_flag:
                     n_models = consensus_flag.split(":")[1]
                     models_str = "·".join(audit.get("models_used", []))
                     logger.info(
                         f"[{ticker}] Consensus {n_models} | "
-                        f"score={audit['score']} | {audit['verdict']} ({models_str})"
+                        f"score={audit['score']}{impact_str} | "
+                        f"{audit['verdict']} ({models_str})"
                     )
                 else:
                     logger.info(
                         f"[{ticker}] respondeu em {elapsed:.1f}s | "
-                        f"score={audit['score']} | {audit['verdict']}"
+                        f"score={audit['score']}{impact_str} | {audit['verdict']}"
                     )
             else:
                 audit = dict(_FALLBACK_AUDIT)

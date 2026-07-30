@@ -22,6 +22,8 @@ Regras (fonte da verdade):
 
 from unittest.mock import patch
 
+import pytest
+
 from b3.decision import deserves_ai_audit, evaluate_signal
 
 _COOLDOWN = "b3.decision.is_in_cooldown"
@@ -373,3 +375,43 @@ def test_pre_gate_coerente_com_o_gate_real():
             assert result["recommendation"] == "AGUARDAR", (
                 f"score={score} gerou {result['recommendation']} em RSI reprovado"
             )
+
+
+# ---------------------------------------------------------------------------
+# Release 3a: `impact` e coletado, nunca consumido
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("impact", [-100, -50, 0, 50, 100])
+def test_impact_nao_altera_decisao(impact):
+    """3a coleta `impact` sem que nenhum gate o leia.
+
+    Se alguem ligar `impact` num gate sem calibrar contra backtest, este teste
+    quebra. E o freio contra transformar um campo novo em decisao de compra
+    baseada em threshold chutado.
+    """
+    with patch(_COOLDOWN, return_value=False), patch(_REGISTER):
+        base = evaluate_signal(_signal(29, 2.0), _audit(score=75))
+        com_impact = evaluate_signal(
+            _signal(29, 2.0), {**_audit(score=75), "impact": impact}
+        )
+    assert com_impact["recommendation"] == base["recommendation"]
+    assert com_impact["confidence"] == base["confidence"]
+
+
+def test_impact_positivo_nao_resgata_sinal_reprovado():
+    """Nem o impact maximo pode fazer um RSI reprovado virar compra."""
+    with patch(_COOLDOWN, return_value=False), patch(_REGISTER):
+        result = evaluate_signal(
+            _signal(58.0, 3.0), {**_audit(score=100), "impact": 100}
+        )
+    assert result["recommendation"] == "AGUARDAR"
+
+
+def test_impact_nao_desfaz_bloqueio_por_manipulacao():
+    """Invariante do CLAUDE.md sob o eixo novo: fraude nao e negociavel."""
+    with patch(_COOLDOWN, return_value=False), patch(_REGISTER):
+        result = evaluate_signal(
+            _signal(29, 2.0),
+            {**_audit(score=100, verdict="MANIPULACAO"), "impact": 100},
+        )
+    assert result["recommendation"] == "BLOQUEADO"

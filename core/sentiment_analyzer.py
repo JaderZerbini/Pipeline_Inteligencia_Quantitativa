@@ -148,8 +148,27 @@ def _weighted_consensus(results: dict) -> dict:
         key=lambda x: _risk_order.get(x, 0),
     )
 
+    # Eixo direcional (release 3a): média ponderada apenas entre os modelos que
+    # devolveram um `impact` numérico. Fica None quando nenhum devolveu — ausência
+    # não deve virar 0, que se confundiria com "neutro medido". Nada consome este
+    # campo ainda; ele é coletado para calibrar threshold com dados reais depois.
+    with_impact = {
+        k: v for k, v in available.items()
+        if isinstance(v.get("impact"), (int, float))
+    }
+    if with_impact:
+        impact_weight = sum(_WEIGHTS[k] for k in with_impact)
+        impact = round(
+            sum(_WEIGHTS[k] * with_impact[k]["impact"] for k in with_impact)
+            / impact_weight
+        )
+        impact = max(-100, min(100, impact))
+    else:
+        impact = None
+
     return {
         "score": round(score),
+        "impact": impact,
         "verdict": verdict,
         "reason": " | ".join(reasons),
         "commodity_risk": commodity_risk,

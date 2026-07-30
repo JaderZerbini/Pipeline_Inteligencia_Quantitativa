@@ -10,6 +10,22 @@ o RSI está em 58 e o ativo está 12% acima da MA200, então não consegue dizer
 a notícia confirma ou contradiz o que o preço já mostra.
 """
 
+# Eixo direcional, separado do `score`. O score responde "esse sinal é
+# confiável?"; não havia canal para "isso é altista ou baixista?", então
+# notícia boa não conseguia virar score alto. Compartilhado pelos dois prompts
+# para que a escala seja idêntica em B3 e cripto — comparar os dois depende
+# disso.
+_IMPACT_INSTRUCTION = (
+    "Além do score, devolva 'impact': a direção e a força esperadas no preço, "
+    "de -100 (forte pressão de queda) a +100 (forte pressão de alta), com 0 "
+    "para neutro ou indeterminado.\n"
+    "'impact' e 'score' medem coisas diferentes e NÃO devem ser iguais: "
+    "'score' é credibilidade (dá para confiar nesta informação?), 'impact' é "
+    "direção (para onde o preço tende?). Uma notícia muito crível de conteúdo "
+    "ruim é score alto com impact negativo. Um rumor otimista de fonte fraca é "
+    "score baixo com impact positivo."
+)
+
 # Campos técnicos injetados no prompt, na ordem de exibição.
 # (chave no dict de entrada, rótulo, formatador)
 _INDICATOR_FIELDS: list[tuple[str, str, str]] = [
@@ -95,9 +111,11 @@ def build_b3_audit_prompt(
         "margens das empresas. Eventos climáticos afetam oferta de "
         "matérias-primas. Decisões de bancos centrais afetam custo de capital."
     )
+    blocks.append(_IMPACT_INSTRUCTION)
     blocks.append(
         "Retorne exatamente:\n"
-        '{"score": <0-100>, "verdict": "<CONFIAVEL|RUIDO|MANIPULACAO>", '
+        '{"score": <0-100>, "impact": <-100 a +100>, '
+        '"verdict": "<CONFIAVEL|RUIDO|MANIPULACAO>", '
         '"reason": "<uma frase sobre o impacto no ativo>", '
         '"commodity_risk": "<ALTO|MEDIO|BAIXO>", '
         '"flags": [<lista de fatores de risco identificados>]}'
@@ -210,9 +228,10 @@ def build_crypto_audit_prompt(
             "Sinal legítimo com timing ruim é CONFIAVEL ou RUIDO com score baixo."
         )
 
+    blocks.append(_IMPACT_INSTRUCTION)
     blocks.append(
         'Responda SOMENTE com JSON: '
-        '{"score": 0-100, '
+        '{"score": 0-100, "impact": -100 a +100, '
         '"verdict": "CONFIAVEL|RUIDO|MANIPULACAO|PUMP|FUD_COORDENADO", '
         '"reason": "uma frase curta", "flags": []}'
     )

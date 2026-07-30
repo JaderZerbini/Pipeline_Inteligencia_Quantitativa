@@ -79,6 +79,8 @@ def _get_ai_consensus(
             if consensus:
                 result = {
                     "score":     consensus.get("score", 50),
+                    # 3a: coletado, nenhum gate le. None = nenhum modelo devolveu.
+                    "impact":    consensus.get("impact"),
                     "veredicto": consensus.get("verdict", "RUIDO"),
                     "razao":     consensus.get("reason", ""),
                 }
@@ -203,7 +205,15 @@ def evaluate_signal(
         ai_score = ai_result.get("score", 50)
         ai_veredicto = ai_result.get("veredicto", "RUIDO")
         razao = ai_result.get("razao", "")
-        reasons.append(f"IA: {ai_veredicto} (score={ai_score}) — {razao}")
+        # 3a: impact aparece na razão para ficar no log e no banco (a coluna
+        # reasons de crypto_signals), mas nenhum gate abaixo o consulta.
+        ai_impact = ai_result.get("impact")
+        impact_str = (
+            f", impact={ai_impact:+d}" if isinstance(ai_impact, int) else ""
+        )
+        reasons.append(
+            f"IA: {ai_veredicto} (score={ai_score}{impact_str}) — {razao}"
+        )
 
         # Manipulação é bloqueio incondicional — score não atenua, por decisão de segurança.
         if ai_veredicto in MANIPULATION_VERDICTS:
