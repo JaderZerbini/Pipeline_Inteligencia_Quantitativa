@@ -127,3 +127,26 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version    INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL
 );
+
+-- Row Level Security --------------------------------------------------------
+-- O Supabase expõe o schema `public` via API REST (PostgREST) usando a chave
+-- `anon`, que é pública por design. Sem RLS, qualquer um que conheça o ref do
+-- projeto lê e escreve nestas tabelas.
+--
+-- Nenhuma policy é criada de propósito: sem policy, `anon` e `authenticated`
+-- ficam sem acesso algum. O pipeline não é afetado — conecta como `postgres`,
+-- que é dono das tabelas e faz bypass de RLS.
+--
+-- Idempotente e obrigatório para toda tabela nova adicionada acima, senão o
+-- advisor do Supabase volta a apontar CRÍTICO.
+
+ALTER TABLE signals          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audits           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE operations       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crypto_signals   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE signal_cooldowns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crypto_positions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE paper_portfolio  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE paper_trades     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE paper_positions  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE schema_version   ENABLE ROW LEVEL SECURITY;
