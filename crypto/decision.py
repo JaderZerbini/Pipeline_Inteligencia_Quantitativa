@@ -138,6 +138,7 @@ def evaluate_signal(
     reasons = []
     ai_score = 50
     ai_veredicto = "NAO_AVALIADO"
+    ai_impact = None   # 3a: coletado, nunca lido por gate
 
     # --- Passo 1: Filtros duros (sem custo, sem IA) ---
 
@@ -218,7 +219,8 @@ def evaluate_signal(
         # Manipulação é bloqueio incondicional — score não atenua, por decisão de segurança.
         if ai_veredicto in MANIPULATION_VERDICTS:
             return _make_result(symbol, "BLOQUEADO", ai_score, ai_veredicto,
-                                [f"Manipulação detectada: {ai_veredicto} — {razao}"])
+                                [f"Manipulação detectada: {ai_veredicto} — {razao}"],
+                                ai_impact=ai_impact)
 
     # --- Passo 3: Classificação por critérios ---
 
@@ -265,16 +267,21 @@ def evaluate_signal(
         else:
             register_cooldown(symbol, pipeline='cripto')
 
-    return _make_result(symbol, final_decision, ai_score, ai_veredicto, reasons)
+    return _make_result(symbol, final_decision, ai_score, ai_veredicto, reasons,
+                        ai_impact=ai_impact)
 
 
-def _make_result(symbol, decision, ai_score, ai_veredicto, reasons) -> dict:
+def _make_result(
+    symbol, decision, ai_score, ai_veredicto, reasons, ai_impact=None
+) -> dict:
     logger.info(f"[DECISION] {symbol}: {decision} | ai={ai_score} | {' | '.join(reasons[:2])}")
     return {
         "symbol": symbol,
         "decision": decision,
         "ai_score": ai_score,
         "ai_veredicto": ai_veredicto,
+        # Coletado para calibração (3a); nenhum gate consulta este valor.
+        "ai_impact": ai_impact,
         "reasons": reasons,
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
     }

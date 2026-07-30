@@ -264,9 +264,11 @@ def _persist(signal_id: int, result: dict, headline: str) -> None:
             if result.get("models_used")
             else "Gemini Direct"
         )
+        impact = result.get("impact")
         save_audit(
             signal_id=signal_id,
             gemini_score=result["score"],
+            impact=impact if isinstance(impact, int) else None,
             headline=headline,
             source=source,
             verdict=result["verdict"],

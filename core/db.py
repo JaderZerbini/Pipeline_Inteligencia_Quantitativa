@@ -542,6 +542,7 @@ def save_audit(
     source: str,
     verdict: str,
     raw_response: str,
+    impact: int | None = None,
 ) -> int:
     """Insert an audit row linked to a signal and return its id.
 
@@ -552,6 +553,10 @@ def save_audit(
         source:       News source identifier (e.g. 'Google News RSS').
         verdict:      Gemini classification: 'CONFIAVEL', 'RUIDO', or 'MANIPULACAO'.
         raw_response: Full raw text returned by Gemini for traceability.
+        impact:       Directional axis from -100 to +100, or None when no model
+                      returned it. Column of its own (not only inside
+                      raw_response) para permitir agregação em SQL na
+                      calibração — ver scripts/add_calibration_columns.sql.
 
     Returns:
         The auto-incremented id of the inserted row.
@@ -559,13 +564,70 @@ def save_audit(
     with _connect() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO audits (signal_id, gemini_score, headline, source, verdict, raw_response)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO audits
+                (signal_id, gemini_score, impact, headline, source, verdict, raw_response)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (signal_id, gemini_score, headline, source, verdict, raw_response),
+            (signal_id, gemini_score, impact, headline, source, verdict, raw_response),
         )
         conn.commit()
         return cursor.lastrowid
+
+
+def save_signal_outcome(
+    pipeline: str,
+    signal_id: int,
+    symbol: str,
+    horizon_days: int,
+    price_at_signal: float | None,
+    price_after: float | None,
+) -> None:
+    """Grava (ou atualiza) o resultado posterior de um sinal.
+
+    É o rótulo que faltava para avaliar previsão: sem saber o que o preço fez
+    depois, `impact` é uma coluna de números sem gabarito. paper_trades só ganha
+    linha quando o sinal vira compra, e a maioria dá AGUARDAR — então a grande
+    massa de sinais não tinha resultado registrado em lugar nenhum.
+
+    Preenchida retroativamente: preço histórico é recuperável no yfinance a
+    qualquer momento (ao contrário de notícia, que os feeds RSS não devolvem
+    para datas passadas). Por isso não há pressa em gravar no momento do sinal.
+
+    Idempotente por (pipeline, signal_id, horizon_days) — recalcular sobrescreve
+    em vez de duplicar.
+
+    Args:
+        pipeline:        'b3' ou 'cripto' (mesma convenção de paper_trades).
+        signal_id:       id em signals (b3) ou crypto_signals (cripto).
+        symbol:          ticker ou par, para não precisar de join na análise.
+        horizon_days:    janela medida, ex. 3, 5 ou 10 dias.
+        price_at_signal: preço no momento do sinal.
+        price_after:     preço após horizon_days.
+    """
+    return_pct = None
+    if price_at_signal and price_after:
+        return_pct = round(((price_after - price_at_signal) / price_at_signal) * 100, 4)
+
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO signal_outcomes
+                (pipeline, signal_id, symbol, horizon_days,
+                 price_at_signal, price_after, return_pct, computed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (pipeline, signal_id, horizon_days) DO UPDATE SET
+                price_at_signal = EXCLUDED.price_at_signal,
+                price_after     = EXCLUDED.price_after,
+                return_pct      = EXCLUDED.return_pct,
+                computed_at     = EXCLUDED.computed_at
+            """,
+            (
+                pipeline, signal_id, symbol, horizon_days,
+                price_at_signal, price_after, return_pct,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        conn.commit()
 
 
 def save_operation(

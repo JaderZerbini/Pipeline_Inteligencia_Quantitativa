@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS audits (
     id           SERIAL PRIMARY KEY,
     signal_id    INTEGER REFERENCES signals(id),
     gemini_score INTEGER,
+    impact       INTEGER,
     headline     TEXT,
     source       TEXT,
     verdict      TEXT,
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS crypto_signals (
     decision       TEXT NOT NULL,
     ai_score       INTEGER,
     ai_veredicto   TEXT,
+    ai_impact      INTEGER,
     price          REAL,
     rsi_1h         REAL,
     galaxy_score   INTEGER,
@@ -128,6 +130,24 @@ CREATE TABLE IF NOT EXISTS schema_version (
     applied_at TEXT NOT NULL
 );
 
+-- Resultado posterior de cada sinal — o rotulo para calibrar `impact`.
+-- Preenchida retroativamente (preco historico e recuperavel no yfinance).
+CREATE TABLE IF NOT EXISTS signal_outcomes (
+    id               SERIAL PRIMARY KEY,
+    pipeline         TEXT    NOT NULL,
+    signal_id        INTEGER NOT NULL,
+    symbol           TEXT    NOT NULL,
+    horizon_days     INTEGER NOT NULL,
+    price_at_signal  REAL,
+    price_after      REAL,
+    return_pct       REAL,
+    computed_at      TEXT    NOT NULL,
+    UNIQUE (pipeline, signal_id, horizon_days)
+);
+
+CREATE INDEX IF NOT EXISTS idx_signal_outcomes_lookup
+    ON signal_outcomes (pipeline, signal_id);
+
 -- Row Level Security --------------------------------------------------------
 -- O Supabase expõe o schema `public` via API REST (PostgREST) usando a chave
 -- `anon`, que é pública por design. Sem RLS, qualquer um que conheça o ref do
@@ -150,3 +170,4 @@ ALTER TABLE paper_portfolio  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE paper_trades     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE paper_positions  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE schema_version   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE signal_outcomes ENABLE ROW LEVEL SECURITY;

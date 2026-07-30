@@ -75,17 +75,18 @@ def _save_crypto_signal(result: dict, signal: dict) -> None:
             conn.execute(
                 """
                 INSERT INTO crypto_signals
-                    (symbol, decision, ai_score, ai_veredicto, price,
+                    (symbol, decision, ai_score, ai_veredicto, ai_impact, price,
                      rsi_1h, galaxy_score, change_pct_24h, sentiment,
                      reasons, created_at,
                      hist_trend, hist_position, pct_from_ma200)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     result["symbol"],
                     result["decision"],
                     result["ai_score"],
                     result["ai_veredicto"],
+                    result.get("ai_impact"),   # 3a: coletado para calibracao
                     signal.get("price"),
                     signal.get("rsi_1h"),
                     signal.get("galaxy_score"),
