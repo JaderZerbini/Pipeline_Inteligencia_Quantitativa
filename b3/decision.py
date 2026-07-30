@@ -6,6 +6,31 @@ import os
 
 from core.db import is_in_cooldown, register_cooldown
 
+# Thresholds de RSI dos gates de compra. Eram números mágicos inline; foram
+# nomeados para que main.py possa decidir se vale auditar sem duplicá-los.
+RSI_MAX_FORTE = 30      # compra forte exige rsi < 30
+RSI_MAX_MODERADO = 38   # compra moderada exige rsi < 38
+
+
+def deserves_ai_audit(rsi: float | None) -> bool:
+    """True quando o RSI ainda permite algum sinal de compra.
+
+    Os dois gates de compra exigem ``rsi <`` seu threshold, e o mais folgado é
+    o moderado. Acima dele nenhum score de auditoria produz compra — os gates
+    são conjuntivos —, então buscar notícia e chamar 3 LLMs é desperdício
+    garantido.
+
+    Usado por main.py para pular a auditoria. Vive aqui, junto dos thresholds
+    que ele espelha, para que afrouxar um gate sem revisar o pré-gate quebre um
+    teste em vez de passar silencioso.
+
+    RSI ausente retorna False: ``evaluate_signal`` trata None como 100, que
+    reprova todos os gates.
+    """
+    if rsi is None:
+        return False
+    return rsi < RSI_MAX_MODERADO
+
 logger = logging.getLogger(__name__)
 
 
@@ -128,16 +153,16 @@ def evaluate_signal(signal: dict, audit: dict, macro: dict = None) -> dict:
         }
 
     # Priority 2: strong buy — oversold RSI + high volume + trusted audit
-    if rsi < 30 and volume_ratio > 1.5 and effective_score >= 70:
+    if rsi < RSI_MAX_FORTE and volume_ratio > 1.5 and effective_score >= 70:
         recommendation = "FORTE"
-        reasons.append(f"RSI em zona de reversão ({rsi:.1f} < 30)")
+        reasons.append(f"RSI em zona de reversão ({rsi:.1f} < {RSI_MAX_FORTE})")
         reasons.append(f"Volume {volume_ratio:.2f}x acima da média de 20 dias")
         reasons.append(f"Auditoria confiável (score={effective_score})")
 
     # Priority 3: moderate buy — RSI elevated but not extreme + decent audit
-    elif rsi < 38 and volume_ratio > 1.2 and effective_score >= 55:
+    elif rsi < RSI_MAX_MODERADO and volume_ratio > 1.2 and effective_score >= 55:
         recommendation = "MODERADO"
-        reasons.append(f"RSI favorável ({rsi:.1f} < 38)")
+        reasons.append(f"RSI favorável ({rsi:.1f} < {RSI_MAX_MODERADO})")
         reasons.append(f"Volume {volume_ratio:.2f}x acima da média")
         reasons.append(f"Auditoria positiva (score={effective_score})")
 

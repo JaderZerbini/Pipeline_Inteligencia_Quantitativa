@@ -8,7 +8,7 @@ from core.db import init_db, update_signal_recommendation
 from b3.scanner import scanner_pro
 from core.sentiment_analyzer import analyze_news
 from b3.news_fetcher import buscar_noticias_ticker
-from b3.decision import evaluate_signal
+from b3.decision import RSI_MAX_MODERADO, deserves_ai_audit, evaluate_signal
 from core.macro_monitor import fetch_macro_snapshot, evaluate_macro
 from b3.monitor import check_stops
 from core.alerts import TelegramAlert, send_alert
@@ -36,6 +36,17 @@ _FALLBACK_AUDIT: dict = {
     "verdict": "RUIDO",
     "reason": "Fallback: auditoria em andamento",
     "flags": ["FALLBACK"],
+}
+
+# Auditoria dispensada por pré-gate de RSI. Distinto de _FALLBACK_AUDIT de
+# propósito: a flag FALLBACK sinaliza "a IA falhou" e derruba a confiança em
+# b3/decision.py. Aqui a IA não falhou — nem foi chamada, porque o sinal já
+# estava reprovado.
+_SKIPPED_AUDIT: dict = {
+    "score": 50,
+    "verdict": "RUIDO",
+    "reason": "Auditoria dispensada: RSI inviabiliza compra",
+    "flags": ["AI_SKIPPED_RSI"],
 }
 
 
@@ -107,54 +118,67 @@ def orquestrar_investimento() -> list[dict]:
         # PASSO 2a: Avaliar contexto macro para este ticker
         macro_result = evaluate_macro(ticker, macro_snapshot)
 
-        # PASSO 2b: Buscar manchetes (síncrono, ~200-400 ms)
-        logger.info(f"[{ticker}] Buscando notícias...")
-        headline = buscar_noticias_ticker(ticker)
-
-        # PASSO 2c: Indicadores técnicos que acompanham a manchete até a IA.
-        # Sem eles a IA julga a notícia no vácuo — não sabe se o ativo já está
-        # esticado ou sobrevendido, então não consegue pesar a margem de alta.
-        indicators = {
-            "price":          row.get("Preço"),
-            "rsi":            row.get("RSI"),
-            "volume_ratio":   row.get("volume_ratio"),
-            "pct_from_ma200": row.get("pct_from_ma200"),
-            "hist_trend":     row.get("hist_trend"),
-        }
-
-        # PASSO 3: Auditoria Gemini em thread daemon — bloqueia até 12s ou até responder
-        audit_result: dict = {}
-        event = threading.Event()
-        thread = threading.Thread(
-            target=_run_audit,
-            args=(headline, ticker, signal_id, audit_result, event, indicators),
-            daemon=True,
-        )
-        t_start = time.time()
-        thread.start()
-        fired = event.wait(timeout=12)
-
-        if fired:
-            audit = audit_result.get("audit", dict(_FALLBACK_AUDIT))
-            elapsed = time.time() - t_start
-            consensus_flag = next(
-                (f for f in audit.get("flags", []) if f.startswith("CONSENSUS:")), None
+        # PASSO 2b: Pré-gate — só busca notícia e audita se o RSI ainda permite
+        # compra. Acima de RSI_MAX_MODERADO nenhum score gera sinal (gates
+        # conjuntivos), então RSS + 3 LLMs por ticker seria desperdício. Em
+        # produção os 4 tickers do ciclo vinham com RSI 55-66, todos reprovados.
+        rsi_atual = row.get("RSI")
+        if not deserves_ai_audit(rsi_atual):
+            logger.info(
+                f"[{ticker}] RSI={rsi_atual:.1f} acima do limite de compra "
+                f"({RSI_MAX_MODERADO}) — sem notícia nem IA"
             )
-            if consensus_flag:
-                n_models = consensus_flag.split(":")[1]
-                models_str = "·".join(audit.get("models_used", []))
-                logger.info(
-                    f"[{ticker}] Consensus {n_models} | "
-                    f"score={audit['score']} | {audit['verdict']} ({models_str})"
-                )
-            else:
-                logger.info(
-                    f"[{ticker}] respondeu em {elapsed:.1f}s | "
-                    f"score={audit['score']} | {audit['verdict']}"
-                )
+            audit = dict(_SKIPPED_AUDIT)
         else:
-            audit = dict(_FALLBACK_AUDIT)
-            logger.warning(f"[{ticker}] timeout — usando fallback")
+            # PASSO 2c: Buscar manchetes (síncrono, ~200-400 ms)
+            logger.info(f"[{ticker}] Buscando notícias...")
+            headline = buscar_noticias_ticker(ticker)
+
+            # PASSO 2d: Indicadores técnicos que acompanham a manchete até a IA.
+            # Sem eles a IA julga a notícia no vácuo — não sabe se o ativo já
+            # está esticado ou sobrevendido, então não pesa a margem de alta.
+            indicators = {
+                "price":          row.get("Preço"),
+                "rsi":            row.get("RSI"),
+                "volume_ratio":   row.get("volume_ratio"),
+                "pct_from_ma200": row.get("pct_from_ma200"),
+                "hist_trend":     row.get("hist_trend"),
+            }
+
+            # PASSO 3: Auditoria em thread daemon — bloqueia até 12s ou responder
+            audit_result: dict = {}
+            event = threading.Event()
+            thread = threading.Thread(
+                target=_run_audit,
+                args=(headline, ticker, signal_id, audit_result, event, indicators),
+                daemon=True,
+            )
+            t_start = time.time()
+            thread.start()
+            fired = event.wait(timeout=12)
+
+            if fired:
+                audit = audit_result.get("audit", dict(_FALLBACK_AUDIT))
+                elapsed = time.time() - t_start
+                consensus_flag = next(
+                    (f for f in audit.get("flags", []) if f.startswith("CONSENSUS:")),
+                    None,
+                )
+                if consensus_flag:
+                    n_models = consensus_flag.split(":")[1]
+                    models_str = "·".join(audit.get("models_used", []))
+                    logger.info(
+                        f"[{ticker}] Consensus {n_models} | "
+                        f"score={audit['score']} | {audit['verdict']} ({models_str})"
+                    )
+                else:
+                    logger.info(
+                        f"[{ticker}] respondeu em {elapsed:.1f}s | "
+                        f"score={audit['score']} | {audit['verdict']}"
+                    )
+            else:
+                audit = dict(_FALLBACK_AUDIT)
+                logger.warning(f"[{ticker}] timeout — usando fallback")
 
         # PASSO 4: Decisão com o audit real (ou fallback se timeout)
         signal_dict = {

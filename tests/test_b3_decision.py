@@ -22,7 +22,7 @@ Regras (fonte da verdade):
 
 from unittest.mock import patch
 
-from b3.decision import evaluate_signal
+from b3.decision import deserves_ai_audit, evaluate_signal
 
 _COOLDOWN = "b3.decision.is_in_cooldown"
 _REGISTER = "b3.decision.register_cooldown"
@@ -331,3 +331,45 @@ def test_forte_suppressed_in_cooldown():
          patch(_APPROVED, {"PETR4"}):
         result = evaluate_signal(_signal(25, 2.0), _audit(80))
     assert result["recommendation"] == "AGUARDAR"
+
+
+# ---------------------------------------------------------------------------
+# Pre-gate de IA: nao auditar sinal que o RSI ja inviabiliza
+# ---------------------------------------------------------------------------
+
+def test_deserves_ai_audit_abaixo_do_moderado():
+    """RSI 29 e 37 ainda podem virar FORTE/MODERADO — vale auditar."""
+    assert deserves_ai_audit(29.0) is True
+    assert deserves_ai_audit(37.9) is True
+
+
+def test_deserves_ai_audit_no_limite_e_acima():
+    """O gate moderado e `rsi < 38`, entao 38 exato ja esta fora."""
+    assert deserves_ai_audit(38.0) is False
+    assert deserves_ai_audit(58.5) is False
+
+
+def test_deserves_ai_audit_rsi_ausente():
+    """RSI ausente vira 100 em evaluate_signal — nenhum sinal possivel."""
+    assert deserves_ai_audit(None) is False
+
+
+def test_pre_gate_coerente_com_o_gate_real():
+    """Invariante: se deserves_ai_audit e False, nenhum audit gera compra.
+
+    Trava a premissa da economia — varre scores de 0 a 100 no RSI reprovado e
+    exige AGUARDAR em todos. Se alguem afrouxar o gate moderado sem atualizar
+    o pre-gate, este teste quebra em vez de silenciosamente pular auditorias
+    que passariam.
+    """
+    rsi_reprovado = 38.0
+    assert deserves_ai_audit(rsi_reprovado) is False
+    with patch(_COOLDOWN, return_value=False), patch(_REGISTER):
+        for score in (0, 55, 70, 100):
+            result = evaluate_signal(
+                _signal(rsi_reprovado, volume_ratio=3.0),
+                _audit(score=score, verdict="CONFIAVEL"),
+            )
+            assert result["recommendation"] == "AGUARDAR", (
+                f"score={score} gerou {result['recommendation']} em RSI reprovado"
+            )
