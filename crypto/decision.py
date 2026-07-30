@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 
 from core.db import is_in_cooldown, register_cooldown
 from core.prompts import build_crypto_audit_prompt  # stdlib-only: seguro no topo
+from core.settings import ai_pregate_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +192,7 @@ def evaluate_signal(
     # Seguro por direção: pular a IA só nos leva a AGUARDAR, nunca a comprar.
     # Perdemos a detecção de manipulação neste par, mas também não há capital
     # exposto — e não comprar é sempre o lado seguro do erro.
-    if rsi > effective_rsi_moderate:
+    if ai_pregate_enabled() and rsi > effective_rsi_moderate:
         reasons.append(
             f"RSI={rsi:.2f} acima do limite moderado "
             f"({effective_rsi_moderate}) — IA não consultada"

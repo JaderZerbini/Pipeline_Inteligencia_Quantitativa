@@ -56,6 +56,13 @@ jobs:
       # 5. Executar o pipeline
       - name: Executar pipeline cripto
         env:
+          # Janela de COLETA DE DADOS para calibrar o eixo `impact` (3b).
+          # Com o pré-gate ligado a IA só roda em par tecnicamente favorável,
+          # gerando amostra pequena e enviesada. Desligado, audita tudo — como
+          # era antes do pré-gate existir.
+          # >>> VOLTAR PARA "on" quando a coleta terminar: cada dia assim custa
+          # ~24 chamadas de LLM no cripto e ~180 no B3.
+          AI_PREGATE: "off"
           # Chaves de API — configure em Settings → Secrets
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

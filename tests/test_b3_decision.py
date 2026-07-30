@@ -415,3 +415,22 @@ def test_impact_nao_desfaz_bloqueio_por_manipulacao():
             {**_audit(score=100, verdict="MANIPULACAO"), "impact": 100},
         )
     assert result["recommendation"] == "BLOQUEADO"
+
+
+def test_pregate_desligado_audita_tudo(monkeypatch):
+    """AI_PREGATE=off restaura o comportamento anterior ao pre-gate.
+
+    Modo de coleta de dados: com o pre-gate ligado a IA so roda em sinal
+    tecnicamente favoravel, gerando amostra pequena e enviesada — inutil para
+    calibrar `impact`, que precisa de casos bons E ruins para provar que separa.
+    """
+    monkeypatch.setenv("AI_PREGATE", "off")
+    assert deserves_ai_audit(58.5) is True
+    assert deserves_ai_audit(100.0) is True
+    assert deserves_ai_audit(None) is True
+
+
+def test_pregate_ligado_volta_a_economizar(monkeypatch):
+    monkeypatch.setenv("AI_PREGATE", "on")
+    assert deserves_ai_audit(58.5) is False
+    assert deserves_ai_audit(29.0) is True

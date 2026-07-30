@@ -317,3 +317,21 @@ def test_pre_gate_respeita_threshold_dinamico_de_downtrend():
          patch(_AI_CALL) as mock_ai:
         evaluate_signal(_signal(38, 60, hist_trend="downtrend"), call_ai=True)
     mock_ai.assert_not_called()
+
+
+def test_pregate_desligado_chama_ia_mesmo_com_rsi_alto(monkeypatch):
+    """Modo coleta: AI_PREGATE=off audita todo par, para amostra sem vies."""
+    monkeypatch.setenv("AI_PREGATE", "off")
+    with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
+         patch(_AI_CALL, return_value={"score": 60, "veredicto": "CONFIAVEL",
+                                       "razao": "x", "impact": 10}) as mock_ai:
+        evaluate_signal(_signal(52, 60), call_ai=True)
+    mock_ai.assert_called_once()
+
+
+def test_pregate_ligado_volta_a_pular(monkeypatch):
+    monkeypatch.setenv("AI_PREGATE", "on")
+    with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
+         patch(_AI_CALL) as mock_ai:
+        evaluate_signal(_signal(52, 60), call_ai=True)
+    mock_ai.assert_not_called()

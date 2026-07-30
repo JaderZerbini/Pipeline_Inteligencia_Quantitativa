@@ -5,6 +5,7 @@ import logging
 import os
 
 from core.db import is_in_cooldown, register_cooldown
+from core.settings import ai_pregate_enabled
 
 # Thresholds de RSI dos gates de compra. Eram números mágicos inline; foram
 # nomeados para que main.py possa decidir se vale auditar sem duplicá-los.
@@ -13,7 +14,11 @@ RSI_MAX_MODERADO = 38   # compra moderada exige rsi < 38
 
 
 def deserves_ai_audit(rsi: float | None) -> bool:
-    """True quando o RSI ainda permite algum sinal de compra.
+    """True quando vale auditar o sinal com IA.
+
+    Com ``AI_PREGATE=off`` devolve sempre True: audita tudo, restaurando o
+    comportamento anterior ao pré-gate. É o modo de **coleta de dados** — a
+    amostra viesada que o pré-gate produz não serve para calibrar `impact`.
 
     Os dois gates de compra exigem ``rsi <`` seu threshold, e o mais folgado é
     o moderado. Acima dele nenhum score de auditoria produz compra — os gates
@@ -27,6 +32,8 @@ def deserves_ai_audit(rsi: float | None) -> bool:
     RSI ausente retorna False: ``evaluate_signal`` trata None como 100, que
     reprova todos os gates.
     """
+    if not ai_pregate_enabled():
+        return True
     if rsi is None:
         return False
     return rsi < RSI_MAX_MODERADO

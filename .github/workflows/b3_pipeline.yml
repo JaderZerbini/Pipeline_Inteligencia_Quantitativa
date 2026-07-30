@@ -59,6 +59,13 @@ jobs:
         env:
           # Persistência PostgreSQL (Supabase)
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Janela de COLETA DE DADOS para calibrar o eixo `impact` (3b).
+          # Com o pre-gate ligado a IA so roda em sinal tecnicamente favoravel,
+          # gerando amostra pequena e enviesada. Desligado, audita tudo — como
+          # era antes do pre-gate existir.
+          # >>> VOLTAR PARA "on" quando a coleta terminar: cada dia assim custa
+          # ~180 chamadas de LLM no B3 e ~24 no cripto.
+          AI_PREGATE: "off"
           # Chaves de API — configure em Settings → Secrets
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
