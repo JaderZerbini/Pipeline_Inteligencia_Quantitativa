@@ -5,6 +5,7 @@ import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
 from datetime import datetime, timezone
+from b3.freshness import is_stale
 from core.db import save_signal
 
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
@@ -140,8 +141,10 @@ def scanner_pro(tickers: list[str] | None = None) -> pd.DataFrame:
     else:
         raw = [t.replace(".SA", "") for t in tickers]
 
-    if not is_market_open():
+    market_open = is_market_open()
+    if not market_open:
         print("[INFO] Mercado fechado — usando último pregão disponível")
+    now_brt = datetime.now(pytz.timezone("America/Sao_Paulo"))
     print(f"Varrendo {len(raw)} tickers em busca de foguetes...")
 
     sa_list = [t + ".SA" for t in raw]
@@ -158,6 +161,17 @@ def scanner_pro(tickers: list[str] | None = None) -> pd.DataFrame:
             continue
 
         if df is None or df.empty or len(df) < 30:
+            continue
+
+        # Feriado da B3 (que is_market_open não conhece) ou fonte atrasada: o
+        # yfinance repete a vela do último pregão. Gerar sinal aqui audita e
+        # grava o mesmo dado várias vezes por dia, com custo de IA.
+        ultima_vela = df.index[-1]
+        if is_stale(ultima_vela.date(), now_brt, market_open):
+            print(
+                f"[SKIP] {ticker}: cotação de {ultima_vela.date()} durante o "
+                f"pregão de {now_brt.date()} — dado desatualizado"
+            )
             continue
 
         df["EMA_20"] = ta.ema(df["Close"], length=20)
