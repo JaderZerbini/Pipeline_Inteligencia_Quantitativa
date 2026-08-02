@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()  # must run before any os.getenv() calls
 
 import json
+import logging
 import os
 import time
 import threading
@@ -13,6 +14,10 @@ from openai import OpenAI
 from core.db import save_audit
 from core.parsing import parse_audit_json
 from core.prompts import build_b3_audit_prompt
+
+# O módulo comunica erro de API por print; falha de persistência vai por logger
+# para cair também no arquivo de log que o Actions guarda como artefato.
+logger = logging.getLogger(__name__)
 
 _key = os.getenv("OPENROUTER_API_KEY")
 if not _key:
@@ -257,7 +262,12 @@ def _call_gemini_direct(api_key: str, prompt: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _persist(signal_id: int, result: dict, headline: str) -> None:
-    """Write audit to DB. models_used is serialised into raw_response as JSON."""
+    """Write audit to DB. models_used is serialised into raw_response as JSON.
+
+    Nunca propaga: gravar a auditoria não pode derrubar a decisão do sinal, que
+    já está em memória. Mas **loga**: a versão anterior engolia a exceção em
+    silêncio e uma coluna faltando no banco local zerou a coleta sem um aviso.
+    """
     try:
         source = (
             "OpenRouter"
@@ -274,8 +284,10 @@ def _persist(signal_id: int, result: dict, headline: str) -> None:
             verdict=result["verdict"],
             raw_response=json.dumps(result, ensure_ascii=False),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(
+            f"[DB] Auditoria do sinal {signal_id} não gravada: {e}"
+        )
 
 
 # ---------------------------------------------------------------------------
