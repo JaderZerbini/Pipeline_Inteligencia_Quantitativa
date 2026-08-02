@@ -13,6 +13,19 @@ RSI_MAX_FORTE = 30      # compra forte exige rsi < 30
 RSI_MAX_MODERADO = 38   # compra moderada exige rsi < 38
 
 
+def band_can_produce_buy(rsi_min: float) -> bool:
+    """A faixa de RSI que o scanner emite consegue virar compra aqui?
+
+    Os gates de compra são conjuntivos e o mais folgado é o moderado, então
+    nenhum sinal com RSI acima de ``RSI_MAX_MODERADO`` vira compra por melhor
+    que seja a auditoria. Se o menor RSI que o scanner emite já está acima
+    desse teto, scanner e decisão estão medindo estratégias diferentes e o
+    pipeline não pode recomendar compra nenhuma — sintoma que precisa
+    aparecer, não ser descoberto contando `AGUARDAR` no banco.
+    """
+    return rsi_min < RSI_MAX_MODERADO
+
+
 def deserves_ai_audit(rsi: float | None) -> bool:
     """True quando vale auditar o sinal com IA.
 

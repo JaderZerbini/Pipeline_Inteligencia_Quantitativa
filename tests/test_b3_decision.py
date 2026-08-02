@@ -434,3 +434,32 @@ def test_pregate_ligado_volta_a_economizar(monkeypatch):
     monkeypatch.setenv("AI_PREGATE", "on")
     assert deserves_ai_audit(58.5) is False
     assert deserves_ai_audit(29.0) is True
+
+
+# ---------------------------------------------------------------------------
+# Compatibilidade entre a faixa que o scanner emite e a que a decisão aprova
+# ---------------------------------------------------------------------------
+
+def test_faixa_abaixo_do_teto_moderado_pode_virar_compra():
+    from b3.decision import RSI_MAX_MODERADO, band_can_produce_buy
+
+    assert band_can_produce_buy(RSI_MAX_MODERADO - 1) is True
+
+
+def test_faixa_acima_do_teto_moderado_nunca_vira_compra():
+    """Gates conjuntivos: acima do teto moderado nenhum score aprova compra."""
+    from b3.decision import RSI_MAX_MODERADO, band_can_produce_buy
+
+    assert band_can_produce_buy(RSI_MAX_MODERADO) is False
+    assert band_can_produce_buy(RSI_MAX_MODERADO + 20) is False
+
+
+def test_sinal_no_topo_da_faixa_do_scanner_termina_em_aguardar():
+    """Documenta o descasamento atual: scanner emite 55-68, decisão exige <38.
+
+    Não é asserção sobre a estratégia certa — é o registro de que, enquanto as
+    duas faixas não se cruzarem, nenhum sinal do scanner pode virar compra.
+    """
+    signal = _signal(rsi=60.0, volume_ratio=2.0)
+    audit = {"score": 95, "verdict": "CONFIAVEL", "flags": []}
+    assert evaluate_signal(signal, audit)["recommendation"] == "AGUARDAR"

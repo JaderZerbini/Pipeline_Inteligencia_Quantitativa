@@ -5,6 +5,8 @@ import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
 from datetime import datetime, timezone
+from b3 import decision as decision_module
+from b3.decision import band_can_produce_buy
 from b3.freshness import is_stale
 from core.db import save_signal
 
@@ -26,6 +28,11 @@ TICKERS_OBSERVACAO = [
 # CSAN3, RENT3, WEGE3, SUZB3, PRIO3
 
 TICKERS = TICKERS_PRIORITARIOS + TICKERS_OBSERVACAO
+
+# Faixa de RSI que caracteriza o sinal de entrada deste scanner (momentum:
+# preço acima da EMA-20 com RSI subindo, mas ainda não esticado).
+RSI_ENTRY_MIN = 55
+RSI_ENTRY_MAX = 68
 
 
 def is_market_open() -> bool:
@@ -145,6 +152,15 @@ def scanner_pro(tickers: list[str] | None = None) -> pd.DataFrame:
     if not market_open:
         print("[INFO] Mercado fechado — usando último pregão disponível")
     now_brt = datetime.now(pytz.timezone("America/Sao_Paulo"))
+
+    if not band_can_produce_buy(RSI_ENTRY_MIN):
+        logger.error(
+            f"[ESTRATÉGIA] O scanner emite sinal com RSI entre {RSI_ENTRY_MIN} e "
+            f"{RSI_ENTRY_MAX} (momentum), mas a decisão só aprova compra com RSI "
+            f"abaixo de {decision_module.RSI_MAX_MODERADO} (reversão). As faixas "
+            f"não se cruzam: todo sinal deste ciclo terminará em AGUARDAR. "
+            f"Alinhar as duas pontas é decisão de estratégia, com backtest."
+        )
     print(f"Varrendo {len(raw)} tickers em busca de foguetes...")
 
     sa_list = [t + ".SA" for t in raw]
@@ -207,7 +223,7 @@ def scanner_pro(tickers: list[str] | None = None) -> pd.DataFrame:
         now = datetime.now(timezone.utc).isoformat()
 
         # Entry signal: price above EMA-20 AND RSI in momentum zone (not exhausted)
-        if current_price > last_row["EMA_20"] and 55 < last_row["RSI"] < 68:
+        if current_price > last_row["EMA_20"] and RSI_ENTRY_MIN < last_row["RSI"] < RSI_ENTRY_MAX:
             trend = get_b3_historical_trend(ticker)
             signal_id = save_signal(
                 timestamp=now,
