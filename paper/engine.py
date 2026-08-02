@@ -250,6 +250,7 @@ def get_portfolio_summary(pipeline: str) -> dict:
     positions = get_open_positions(portfolio_id)
 
     unrealized_pnl = 0.0
+    open_market_value = 0.0
     open_pos_list = []
     for pos in positions:
         cur = pos.get("current_price") or pos["entry_price"]
@@ -258,6 +259,7 @@ def get_portfolio_summary(pipeline: str) -> dict:
         p = (cur - entry) * qty
         p_pct = ((cur - entry) / entry * 100) if entry else 0.0
         unrealized_pnl += p
+        open_market_value += cur * qty
         open_pos_list.append({
             "symbol": pos["symbol"],
             "entry_price": entry,
@@ -295,7 +297,10 @@ def get_portfolio_summary(pipeline: str) -> dict:
         ).fetchone()[0]
 
     current_capital = portfolio["current_capital"]
-    total_value = current_capital + unrealized_pnl
+    # A compra já debitou o caixa, então o patrimônio é caixa + valor de
+    # mercado das posições abertas. Somar apenas o P&L não realizado deixava o
+    # dinheiro investido fora da conta e mostrava prejuízo logo após comprar.
+    total_value = current_capital + open_market_value
     initial = portfolio["initial_capital"]
     total_return_pct = ((total_value - initial) / initial * 100) if initial else 0.0
     win_rate = round((wins / closed_count * 100) if closed_count else 0.0, 1)
