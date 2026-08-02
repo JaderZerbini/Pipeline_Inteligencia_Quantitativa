@@ -4,7 +4,7 @@ import sys
 import threading
 import time
 from datetime import datetime
-from core.db import init_db, update_signal_recommendation
+from core.db import assert_persistence_configured, init_db, update_signal_recommendation
 from b3.scanner import scanner_pro
 from core.sentiment_analyzer import analyze_news
 from b3.news_fetcher import buscar_noticias_ticker
@@ -81,6 +81,8 @@ def orquestrar_investimento() -> list[dict]:
     Returns:
         List of decision dicts for each scanned ticker, consumed by Streamlit.
     """
+    # Falha cedo se o banco deste ambiente for descartável (ver o guard)
+    assert_persistence_configured()
     init_db()
     logger.info("=== INICIANDO PIPELINE DE INTELIGÊNCIA QUANTITATIVA ===")
 

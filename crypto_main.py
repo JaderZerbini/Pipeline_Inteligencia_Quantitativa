@@ -33,7 +33,7 @@ from crypto.monitor import check_stops, open_position
 
 # Módulos existentes do Terminal Quant (não modificados)
 from core.alerts import send_alert
-from core.db import get_connection, init_db
+from core.db import assert_persistence_configured, get_connection, init_db
 from paper.engine import (
     execute_paper_buy as _paper_buy,
     check_paper_stops as _check_paper_stops,
@@ -118,7 +118,11 @@ def run_pipeline(dry_run: bool = False) -> None:
         print("Modo: PRODUÇÃO")
     print("=" * 60)
 
-    # 0. Garantir que tabelas existam (inclui signal_cooldowns e crypto_positions)
+    # 0. Falhar cedo se o banco deste ambiente for descartável (ver o guard)
+    if not dry_run:
+        assert_persistence_configured()
+
+    # 0b. Garantir que tabelas existam (inclui signal_cooldowns e crypto_positions)
     init_db()
 
     # 1. Coleta de dados (Binance + CoinGecko)

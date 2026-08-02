@@ -185,6 +185,37 @@ if IS_POSTGRES:
             return False
 
 
+def assert_persistence_configured() -> None:
+    """Aborta quando o pipeline roda em ambiente efêmero sem banco remoto.
+
+    O runner do GitHub Actions é descartado no fim do job: sem DATABASE_URL o
+    SQLite é gravado e jogado fora, e o ciclo relata sucesso mesmo tendo
+    perdido tudo — foi o que aconteceu com o pipeline cripto, que rodou dias
+    pagando LLM sem persistir uma linha.
+
+    Rodar em SQLite local continua liberado (o disco não some). Para um teste
+    deliberado no Actions, ``ALLOW_EPHEMERAL_DB=1`` desativa o guard.
+
+    Raises:
+        RuntimeError: em CI sem DATABASE_URL e sem opt-out explícito.
+    """
+    if IS_POSTGRES:
+        return
+    if os.getenv("GITHUB_ACTIONS", "").strip().lower() != "true":
+        return
+    if os.getenv("ALLOW_EPHEMERAL_DB", "").strip():
+        logger.warning(
+            "[DB] ALLOW_EPHEMERAL_DB ativo — dados deste run serão descartados"
+        )
+        return
+    raise RuntimeError(
+        "DATABASE_URL não configurada em ambiente de CI. O banco do runner é "
+        "descartado no fim do job e todo o ciclo seria perdido. Adicione "
+        "DATABASE_URL ao bloco env: do workflow (secrets.DATABASE_URL) ou "
+        "defina ALLOW_EPHEMERAL_DB=1 para um run descartável."
+    )
+
+
 def _connect():
     """Open a database connection for the active backend.
 
