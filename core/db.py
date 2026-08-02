@@ -293,6 +293,29 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         (13, "ALTER TABLE signals ADD COLUMN hist_trend TEXT"),
         (14, "ALTER TABLE signals ADD COLUMN hist_position TEXT"),
         (15, "ALTER TABLE signals ADD COLUMN pct_from_ma200 REAL"),
+        # 16-18: coleta do eixo `impact` (release 3a). No Postgres vieram do
+        # schema-postgres.sql e do scripts/add_calibration_columns.sql; aqui
+        # é o equivalente para o SQLite local. Sem o CHECK de faixa: o SQLite
+        # não aceita constraint em ADD COLUMN, e a validação já acontece antes
+        # de gravar (core/parsing.py). O Postgres mantém o CHECK.
+        (16, "ALTER TABLE audits ADD COLUMN impact INTEGER"),
+        (17, "ALTER TABLE crypto_signals ADD COLUMN ai_impact INTEGER"),
+        (18, """
+            CREATE TABLE IF NOT EXISTS signal_outcomes (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                pipeline         TEXT    NOT NULL,
+                signal_id        INTEGER NOT NULL,
+                symbol           TEXT    NOT NULL,
+                horizon_days     INTEGER NOT NULL,
+                price_at_signal  REAL,
+                price_after      REAL,
+                return_pct       REAL,
+                computed_at      TEXT    NOT NULL,
+                UNIQUE (pipeline, signal_id, horizon_days)
+            )
+        """),
+        (19, "CREATE INDEX IF NOT EXISTS idx_signal_outcomes_lookup "
+             "ON signal_outcomes (pipeline, signal_id)"),
     ]
 
     for version, sql in migrations:
