@@ -35,7 +35,13 @@ def _get_bot() -> tuple[Bot | None, str | None]:
         )
         return None, None
 
-    _bot = Bot(token=token)
+    try:
+        _bot = Bot(token=token)
+    except Exception as e:
+        # Token malformado levanta na construção. Sem isto a exceção sobe por
+        # send_alert() e derruba o pipeline por causa de um alerta.
+        logger.error(f"[TELEGRAM] Token inválido — alertas desabilitados: {e}")
+        return None, None
     _chat_id = chat_id
     return _bot, _chat_id
 
@@ -45,7 +51,12 @@ def _get_bot() -> tuple[Bot | None, str | None]:
 # ---------------------------------------------------------------------------
 
 def send_alert(message: str) -> bool:
-    """Send a Markdown message via Telegram. Returns True on success."""
+    """Send a Markdown message via Telegram. Returns True on success.
+
+    Nunca levanta: os pipelines chamam isto no meio do loop de ativos e uma
+    falha de rede não pode interromper o ciclo (paper trading e trailing stops
+    vêm depois). Falha vira log + retorno False.
+    """
     bot, chat_id = _get_bot()
     if bot is None:
         return False
@@ -74,6 +85,13 @@ def send_alert(message: str) -> bool:
             return True
         except TelegramError as e:
             logger.error(f"[TELEGRAM] Falha ao enviar: {e}")
+            return False
+        except Exception as e:
+            # Rede fora, DNS, timeout: capturar só TelegramError deixava a
+            # exceção subir e abortar o pipeline no meio do loop de tickers,
+            # antes do paper trading e dos trailing stops. Alerta é efeito
+            # colateral do ciclo, não pode derrubá-lo.
+            logger.error(f"[TELEGRAM] Falha inesperada ao enviar: {e}")
             return False
 
 
