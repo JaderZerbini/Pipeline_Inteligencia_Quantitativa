@@ -63,6 +63,9 @@ jobs:
           # >>> VOLTAR PARA "on" quando a coleta terminar: cada dia assim custa
           # ~24 chamadas de LLM no cripto e ~180 no B3.
           AI_PREGATE: "off"
+          # Sem isto o pipeline grava no SQLite do runner, que é descartado no
+          # fim do job — a coleta do `impact` no cripto se perdia inteira.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # Chaves de API — configure em Settings → Secrets
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
