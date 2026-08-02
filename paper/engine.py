@@ -108,7 +108,14 @@ def execute_paper_buy(
         return None
 
     open_count = count_open_positions(portfolio_id)
-    sizing = calculate_position(decision, portfolio["current_capital"], open_count, price)
+    # Ação da B3 não fraciona; cripto sim.
+    sizing = calculate_position(
+        decision,
+        portfolio["current_capital"],
+        open_count,
+        price,
+        whole_units=(pipeline == "b3"),
+    )
     if not sizing["allowed"]:
         logger.info(f"[PAPER BUY] {symbol} — {sizing['reason']}")
         return None

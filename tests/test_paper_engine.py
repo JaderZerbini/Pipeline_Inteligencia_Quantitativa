@@ -42,7 +42,8 @@ def test_patrimonio_acompanha_valorizacao(portfolio):
     )
     engine.check_paper_stops({"PETR4": 44.0}, pipeline="b3")  # +10%
     resumo = engine.get_portfolio_summary("b3")
-    investido = engine.INITIAL_CAPITAL * 0.10
+    # 10% de 5.000 = 500, que a 40,00 compra 12 ações inteiras (B3 não fraciona)
+    investido = 12 * 40.0
     assert resumo["total_value"] == pytest.approx(
         engine.INITIAL_CAPITAL + investido * 0.10, abs=0.5
     )

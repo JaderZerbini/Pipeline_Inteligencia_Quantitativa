@@ -22,6 +22,7 @@ def calculate_position(
     capital: float,
     open_positions: int,
     price: float,
+    whole_units: bool = False,
 ) -> dict:
     """
     Returns suggested position size for a signal.
@@ -31,6 +32,9 @@ def calculate_position(
         capital:        total available capital in BRL or USD
         open_positions: number of currently open positions
         price:          current asset price
+        whole_units:    True para ativo indivisível (ação da B3). Arredonda a
+                        quantidade para baixo e recalcula alloc_value pelo que
+                        de fato caberia na ordem; cripto segue fracionário.
 
     Returns dict with:
         allowed:     bool — whether to enter at all
@@ -51,6 +55,15 @@ def calculate_position(
     pct = min(ALLOCATION[decision], MAX_SINGLE)
     value = round(capital * pct, 2)
     units = round(value / price, 6) if price > 0 else 0
+
+    if whole_units:
+        units = int(units)
+        if units < 1:
+            return {"allowed": False,
+                    "reason": f"Alocação de {value:.2f} não cobre uma unidade "
+                              f"a {price:.2f}",
+                    "alloc_pct": 0, "alloc_value": 0, "units": 0}
+        value = round(units * price, 2)
 
     return {
         "allowed": True,
