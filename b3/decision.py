@@ -41,6 +41,21 @@ def deserves_ai_audit(rsi: float | None) -> bool:
 logger = logging.getLogger(__name__)
 
 
+def _backtest_results_path() -> str:
+    """Caminho do JSON de backtest, ancorado na raiz do repo.
+
+    Era relativo ao diretório de trabalho, então rodar o pipeline de qualquer
+    lugar que não a raiz já caía no fallback mesmo com o arquivo presente.
+    BACKTEST_RESULTS_PATH permite apontar para uma cópia versionada — em
+    produção `data/` não existe, porque está no .gitignore.
+    """
+    override = os.getenv("BACKTEST_RESULTS_PATH", "").strip()
+    if override:
+        return override
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(raiz, "data", "backtest_results.json")
+
+
 def _load_approved_tickers() -> set:
     """Loads approved tickers from backtest results file.
 
@@ -52,13 +67,20 @@ def _load_approved_tickers() -> set:
     Tickers include '.SA' suffix — stripped here to match signal dict usage.
     Falls back to hardcoded set if file is missing or unreadable.
     """
-    results_path = os.path.join("data", "backtest_results.json")
+    results_path = _backtest_results_path()
     fallback = {"SBSP3", "VALE3", "ITUB4", "PETR4", "B3SA3", "BBDC4"}
 
     try:
         if not os.path.exists(results_path):
-            logger.warning(
-                "[BACKTEST] backtest_results.json não encontrado — usando lista fallback"
+            # ERROR, não warning: no GitHub Actions o arquivo nunca existe
+            # (data/ está no .gitignore e o backtester não roda lá), então o
+            # gate que deveria refletir backtest vira uma lista fixa escrita à
+            # mão — e isso decide quais ativos podem virar compra.
+            logger.error(
+                f"[BACKTEST] {results_path} não encontrado — o gate está usando "
+                f"a lista fixa {sorted(fallback)}, não resultados de backtest. "
+                f"Gere com `python -m b3.backtester` ou aponte "
+                f"BACKTEST_RESULTS_PATH para um arquivo versionado."
             )
             return fallback
 
