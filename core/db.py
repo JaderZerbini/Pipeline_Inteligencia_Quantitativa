@@ -493,23 +493,18 @@ def init_db() -> None:
         ensure_default_portfolio()
 
 
-def ensure_default_portfolio() -> int:
-    """Creates the default paper trading portfolio if none exists. Returns its ID."""
-    with get_connection() as conn:
-        existing = conn.execute(
-            "SELECT id FROM paper_portfolio LIMIT 1"
-        ).fetchone()
-        if existing:
-            return existing[0]
-        now = datetime.now(timezone.utc).isoformat()
-        cursor = conn.execute(
-            "INSERT INTO paper_portfolio "
-            "(name, initial_capital, current_capital, pipeline, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            ("Principal", 5000.0, 5000.0, "both", now, now),
-        )
-        conn.commit()
-        return cursor.lastrowid
+def ensure_default_portfolio() -> None:
+    """No-op mantido pelas chamadas em init_db().
+
+    Criava um portfólio com pipeline='both' e R$5.000. Ninguém o lê:
+    ``paper.engine.get_portfolio()`` busca por pipeline ('b3' ou 'cripto') e
+    cria o que faltar sob demanda. O resultado era um terceiro portfólio
+    órfão que inflava o capital simulado total sem nunca receber um trade.
+
+    As linhas já criadas ficam no banco — apagá-las é decisão de quem opera,
+    não efeito colateral de um deploy.
+    """
+    return None
 
 
 def is_in_cooldown(ticker: str, pipeline: str = 'b3', hours: int = 4) -> bool:
