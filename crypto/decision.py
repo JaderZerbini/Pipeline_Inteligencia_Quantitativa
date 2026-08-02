@@ -306,7 +306,11 @@ def _count_open_crypto_positions() -> int:
 
 def format_telegram_message(signal: dict, result: dict) -> str:
     """Formata o alerta que será enviado via alerts.py existente."""
-    from position_sizing import calculate_position
+    # core.position_sizing é stdlib puro; o import segue dentro da função só
+    # para manter o padrão do módulo. O caminho errado ('position_sizing')
+    # levantava ModuleNotFoundError e derrubava o pipeline no primeiro sinal
+    # acionável, que é exatamente quando esta função é chamada.
+    from core.position_sizing import calculate_position
 
     label = {"FORTE": "COMPRA FORTE", "MODERADO": "COMPRA MODERADA"}.get(
         result["decision"], result["decision"]

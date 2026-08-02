@@ -335,3 +335,25 @@ def test_pregate_ligado_volta_a_pular(monkeypatch):
          patch(_AI_CALL) as mock_ai:
         evaluate_signal(_signal(52, 60), call_ai=True)
     mock_ai.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Formatação do alerta — o caminho que só roda quando há sinal acionável
+# ---------------------------------------------------------------------------
+
+def test_alerta_de_sinal_acionavel_inclui_sugestao_de_alocacao():
+    """Regressao: o modulo de sizing era importado por um caminho inexistente.
+
+    format_telegram_message() so e chamada quando ha FORTE/MODERADO, e o
+    crypto_main nao protege a chamada — o ModuleNotFoundError derrubava o
+    ciclo inteiro no primeiro sinal acionavel, sem alerta e sem paper trading.
+    """
+    from crypto.decision import format_telegram_message
+
+    with patch(_COOLDOWN, return_value=False), patch(_REGISTER):
+        result = evaluate_signal(_signal(30, 55, change=-4.0), call_ai=False)
+    assert result["decision"] in ("FORTE", "MODERADO")
+
+    with patch("crypto.decision._count_open_crypto_positions", return_value=0):
+        msg = format_telegram_message(_signal(30, 55, change=-4.0), result)
+    assert "Sugestão de alocação" in msg
