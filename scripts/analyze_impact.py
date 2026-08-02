@@ -25,7 +25,7 @@ import json
 import os
 import statistics
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -157,12 +157,29 @@ def triagem(amostras: list[dict]) -> None:
 # 2. Rótulo — retorno posterior via yfinance
 # ---------------------------------------------------------------------------
 
+def _como_utc(bruto) -> datetime | None:
+    """Converte `created_at` em datetime *aware* em UTC. None se não der.
+
+    Os dois pipelines gravam formatos diferentes: o B3 usa isoformat sem
+    fuso e o cripto grava com '+00:00'. Misturar naive e aware numa comparação
+    levanta TypeError, então tudo é normalizado para UTC aqui — um sinal sem
+    fuso é lido como UTC, que é como ambos os pipelines geram o carimbo.
+    """
+    if not bruto:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(bruto).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 def _preco_apos(symbol: str, quando: datetime, dias: int) -> float | None:
     """Fecha do primeiro pregão >= quando + dias. None se ainda não existe."""
     import yfinance as yf
 
     alvo = quando + timedelta(days=dias)
-    if alvo > datetime.now():
+    if alvo > datetime.now(timezone.utc):
         return None  # o futuro ainda não aconteceu
 
     ticker = symbol if symbol.endswith("USDT") else f"{symbol}.SA"
@@ -193,10 +210,11 @@ def calcular_rotulos(amostras: list[dict], horizontes: list[int]) -> int:
     print("=" * 62)
 
     gravados = 0
+    ignorados = 0
     for a in amostras:
-        try:
-            quando = datetime.fromisoformat(str(a["created_at"]).replace("Z", ""))
-        except ValueError:
+        quando = _como_utc(a["created_at"])
+        if quando is None:
+            ignorados += 1
             continue
         for h in horizontes:
             depois = _preco_apos(a["symbol"], quando, h)
@@ -209,6 +227,8 @@ def calcular_rotulos(amostras: list[dict], horizontes: list[int]) -> int:
             )
             gravados += 1
     print(f"outcomes gravados/atualizados: {gravados}")
+    if ignorados:
+        print(f"amostras com created_at ilegível: {ignorados}")
     if gravados == 0:
         print("Nenhum horizonte maduro ainda — os sinais são recentes demais.")
     return gravados
