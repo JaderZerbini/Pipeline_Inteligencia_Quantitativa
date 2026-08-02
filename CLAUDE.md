@@ -48,7 +48,8 @@ backtest) pode sobrescrever esse resultado.
    a coleta no CI.
 2. **Não mova o import de `analyze_crypto` para o topo de `crypto/decision.py`** — ele é
    intencionalmente lazy. Ver bug corrigido em [lazy import](crypto/decision.py#L88).
-3. **Não edite `data/backtest_results.json` à mão** — é gerado por `scripts/backtest.py`.
+3. **Não edite `data/backtest_results.json` à mão** — é gerado por `b3/backtester.py`
+   (`scripts/backtest.py` é exploração de um ticker só, com gráfico, e não escreve o JSON).
    Edições manuais corrompem o gate de backtest de `b3/decision.py`.
 4. **Não adicione lógica após o `return` de BLOQUEADO** — qualquer score ou gate que venha
    depois é código morto e indica regressão no fluxo de segurança.

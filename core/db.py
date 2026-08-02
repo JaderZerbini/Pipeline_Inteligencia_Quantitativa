@@ -363,8 +363,9 @@ def run_migrations(conn: sqlite3.Connection) -> None:
                 logger.error(f"[DB] Migração {version} falhou: {e}")
 
 
-# schema.sql usa sintaxe SQLite (AUTOINCREMENT); o Postgres precisa do DDL
-# equivalente com SERIAL — daí o arquivo separado schema-postgres.sql.
+# O DDL do SQLite vive em init_db()/run_migrations() aqui neste módulo; o
+# Postgres precisa do equivalente com SERIAL — daí o schema-postgres.sql.
+# tests/test_db_schema.py trava que os dois não divirjam.
 _SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema-postgres.sql"
 _pg_init_done = False
 
@@ -377,7 +378,7 @@ def _read_schema_sql() -> str:
 
 
 def _init_db_postgres() -> None:
-    """Create all tables on PostgreSQL from schema.sql. Idempotent."""
+    """Create all tables on PostgreSQL from schema-postgres.sql. Idempotent."""
     global _pg_init_done
     if _pg_init_done:
         return

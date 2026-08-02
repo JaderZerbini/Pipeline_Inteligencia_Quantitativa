@@ -2,9 +2,11 @@
 --
 -- Por que este script existe separado do schema-postgres.sql: init_db() no
 -- Postgres só roda CREATE TABLE IF NOT EXISTS, que NÃO adiciona coluna em
--- tabela existente. E run_migrations() em core/db.py é código morto (ninguém
--- chama). Então mudança em tabela já criada precisa de ALTER explícito, igual
--- fizemos no enable_rls.sql.
+-- tabela existente. E run_migrations() em core/db.py só roda no caminho
+-- SQLite (init_db() retorna antes dele quando DATABASE_URL está definida).
+-- Então mudança em tabela já criada no Postgres precisa de ALTER explícito,
+-- igual fizemos no enable_rls.sql. O lado SQLite das mesmas colunas está nas
+-- migrações 16-19 de core/db.py.
 --
 -- Aplicar:
 --   psql "$DATABASE_URL" -f scripts/add_calibration_columns.sql

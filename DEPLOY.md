@@ -61,7 +61,7 @@ python scripts/setup_supabase.py
 DATABASE_URL="postgresql://..." python scripts/setup_supabase.py
 ```
 
-O script lê o `schema.sql` e imprime `OK` para cada tabela/índice criado.
+O script lê o `schema-postgres.sql` e imprime `OK` para cada tabela/índice criado.
 
 ---
 
