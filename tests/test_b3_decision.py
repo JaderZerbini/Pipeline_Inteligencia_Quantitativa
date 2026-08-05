@@ -8,11 +8,15 @@ Funções testadas
 evaluate_signal(signal: dict, audit: dict, macro: dict = None) -> dict
   Retorno: {"recommendation": str, "confidence": float, "reasons": list, "flags": list}
 
-Regras (fonte da verdade):
+Regras (fonte da verdade) — tese de MOMENTUM, validada em backtest de 10 anos:
   BLOQUEADO : verdict == "MANIPULACAO" (independente de qualquer outro critério)
-  FORTE     : rsi < 30  AND volume_ratio > 1.5  AND effective_score >= 70
-  MODERADO  : rsi < 38  AND volume_ratio > 1.2  AND effective_score >= 55
+  FORTE     : 55 < rsi < 68  AND volume_ratio > 1.5  AND effective_score >= 70
+  MODERADO  : 55 < rsi < 68  AND volume_ratio > 1.2  AND effective_score >= 55
   AGUARDAR  : qualquer outro caso
+
+  Os dois níveis compartilham a mesma faixa de RSI: o que separa FORTE de
+  MODERADO é volume e score da auditoria, não RSI. Fora da faixa nenhum dos
+  dois passa — não existe rebaixamento de FORTE para MODERADO por RSI.
   Gate macro      : macro_ok=False rebaixa FORTE → MODERADO
   Gate MA200      : pct_from_ma200 > 30 e above_ma200 → AGUARDAR
   Gate downtrend  : effective_score < 75 em downtrend → AGUARDAR
@@ -65,23 +69,23 @@ def _macro(score_adjustment=0, macro_ok=True, warnings=None, flags=None):
 # ---------------------------------------------------------------------------
 
 def test_forte_basic():
-    """RSI=25 (<30), volume=2.0x (>1.5), score=80 (>=70) → FORTE."""
+    """RSI=60 (na faixa 55-68), volume=2.0x (>1.5), score=80 (>=70) → FORTE."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(25, 2.0), _audit(80))
+        result = evaluate_signal(_signal(60, 2.0), _audit(80))
     assert result["recommendation"] == "FORTE"
 
 
 def test_moderado_basic():
-    """RSI=35 (>=30, <38), volume=1.3x (>1.2), score=60 (>=55, <70) → MODERADO."""
+    """RSI=60 (na faixa 55-68), volume=1.3x (>1.2), score=60 (>=55, <70) → MODERADO."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(35, 1.3), _audit(60))
+        result = evaluate_signal(_signal(60, 1.3), _audit(60))
     assert result["recommendation"] == "MODERADO"
 
 
 def test_aguardar_insufficient_criteria():
-    """RSI=45 (>=38), volume=0.8x (<1.2), score=40 (<55) → AGUARDAR."""
+    """RSI=45 (fora da faixa), volume=0.8x (<1.2), score=40 (<55) → AGUARDAR."""
     result = evaluate_signal(_signal(45, 0.8), _audit(40))
     assert result["recommendation"] == "AGUARDAR"
 
@@ -89,7 +93,7 @@ def test_aguardar_insufficient_criteria():
 def test_bloqueado_manipulation():
     """Veredito MANIPULACAO → BLOQUEADO independente de RSI/volume/score perfeitos."""
     result = evaluate_signal(
-        _signal(20, 3.0),  # tecnicos perfeitos para FORTE
+        _signal(60, 3.0),  # tecnicos perfeitos para FORTE
         _audit(90, verdict="MANIPULACAO"),
     )
     assert result["recommendation"] == "BLOQUEADO"
@@ -99,33 +103,46 @@ def test_bloqueado_manipulation():
 # Fronteiras de RSI
 # ---------------------------------------------------------------------------
 
-def test_rsi_29_qualifies_for_forte():
-    """RSI=29 esta abaixo de 30: deve classificar como FORTE."""
+def test_rsi_56_dentro_da_faixa_qualifica_forte():
+    """RSI=56 esta dentro de (55, 68): deve classificar como FORTE."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(29, 2.0), _audit(80))
+        result = evaluate_signal(_signal(56, 2.0), _audit(80))
     assert result["recommendation"] == "FORTE"
 
 
-def test_rsi_30_fails_forte_falls_to_moderado():
-    """RSI=30 NAO e < 30 (FORTE falha); e < 38 (MODERADO passa)."""
+def test_rsi_55_no_limite_inferior_falha():
+    """RSI=55 NAO e > 55: fora da faixa, nenhum nivel de compra passa.
+
+    Sob a tese de momentum os dois niveis compartilham a mesma faixa de RSI —
+    o que separa FORTE de MODERADO e volume e score, nao RSI. Entao ficar fora
+    da faixa reprova os dois de uma vez, e nao ha rebaixamento para MODERADO.
+    """
+    result = evaluate_signal(_signal(55, 2.0), _audit(80))
+    assert result["recommendation"] == "AGUARDAR"
+
+
+def test_rsi_67_dentro_da_faixa_qualifica_moderado():
+    """RSI=67 esta dentro de (55, 68): deve classificar como MODERADO."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(30, 2.0), _audit(80))
+        result = evaluate_signal(_signal(67, 1.3), _audit(60))
     assert result["recommendation"] == "MODERADO"
 
 
-def test_rsi_37_qualifies_for_moderado():
-    """RSI=37 esta abaixo de 38: deve classificar como MODERADO."""
-    with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
-         patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(37, 1.3), _audit(60))
-    assert result["recommendation"] == "MODERADO"
+def test_rsi_68_no_limite_superior_falha():
+    """RSI=68 NAO e < 68: movimento ja esticado, fora da faixa de entrada."""
+    result = evaluate_signal(_signal(68, 1.3), _audit(60))
+    assert result["recommendation"] == "AGUARDAR"
 
 
-def test_rsi_38_fails_moderado():
-    """RSI=38 NAO e < 38: deve resultar em AGUARDAR."""
-    result = evaluate_signal(_signal(38, 1.3), _audit(60))
+def test_rsi_sobrevendido_nao_e_mais_compra():
+    """RSI=25 era FORTE sob a tese de reversao; sob momentum e AGUARDAR.
+
+    Trava a troca de estrategia: comprar na fraqueza deixou de ser a regra
+    depois do backtest de 10 anos.
+    """
+    result = evaluate_signal(_signal(25, 2.0), _audit(80))
     assert result["recommendation"] == "AGUARDAR"
 
 
@@ -137,7 +154,7 @@ def test_volume_151_qualifies_for_forte():
     """volume_ratio=1.51 (>1.5) com RSI e score ok → FORTE."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(25, 1.51), _audit(80))
+        result = evaluate_signal(_signal(60, 1.51), _audit(80))
     assert result["recommendation"] == "FORTE"
 
 
@@ -145,7 +162,7 @@ def test_volume_150_fails_forte_falls_to_moderado():
     """volume_ratio=1.50 NAO e >1.5 (FORTE falha); e >1.2 (MODERADO passa)."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(25, 1.50), _audit(80))
+        result = evaluate_signal(_signal(60, 1.50), _audit(80))
     assert result["recommendation"] == "MODERADO"
 
 
@@ -153,13 +170,13 @@ def test_volume_121_qualifies_for_moderado():
     """volume_ratio=1.21 (>1.2) com RSI e score ok → MODERADO."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(35, 1.21), _audit(60))
+        result = evaluate_signal(_signal(60, 1.21), _audit(60))
     assert result["recommendation"] == "MODERADO"
 
 
 def test_volume_120_fails_moderado():
     """volume_ratio=1.20 NAO e >1.2: deve resultar em AGUARDAR."""
-    result = evaluate_signal(_signal(35, 1.20), _audit(60))
+    result = evaluate_signal(_signal(60, 1.20), _audit(60))
     assert result["recommendation"] == "AGUARDAR"
 
 
@@ -171,7 +188,7 @@ def test_score_70_qualifies_for_forte():
     """Score=70 (>=70) com RSI e volume ok → FORTE."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(25, 2.0), _audit(70))
+        result = evaluate_signal(_signal(60, 2.0), _audit(70))
     assert result["recommendation"] == "FORTE"
 
 
@@ -179,7 +196,7 @@ def test_score_69_fails_forte_falls_to_moderado():
     """Score=69 (<70) falha gate FORTE; e >=55 passa MODERADO."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(25, 2.0), _audit(69))
+        result = evaluate_signal(_signal(60, 2.0), _audit(69))
     assert result["recommendation"] == "MODERADO"
 
 
@@ -187,13 +204,13 @@ def test_score_55_qualifies_for_moderado():
     """Score=55 (>=55) com RSI e volume ok → MODERADO."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(35, 1.3), _audit(55))
+        result = evaluate_signal(_signal(60, 1.3), _audit(55))
     assert result["recommendation"] == "MODERADO"
 
 
 def test_score_54_fails_moderado():
     """Score=54 (<55): deve resultar em AGUARDAR."""
-    result = evaluate_signal(_signal(35, 1.3), _audit(54))
+    result = evaluate_signal(_signal(60, 1.3), _audit(54))
     assert result["recommendation"] == "AGUARDAR"
 
 
@@ -205,7 +222,7 @@ def test_macro_ok_false_downgrades_forte_to_moderado():
     """Sinal FORTE com macro_ok=False deve ser rebaixado para MODERADO."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(25, 2.0), _audit(80), macro=_macro(macro_ok=False))
+        result = evaluate_signal(_signal(60, 2.0), _audit(80), macro=_macro(macro_ok=False))
     assert result["recommendation"] == "MODERADO"
 
 
@@ -213,7 +230,7 @@ def test_macro_ok_false_does_not_downgrade_moderado():
     """macro_ok=False rebaixa apenas FORTE; MODERADO permanece MODERADO."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(35, 1.3), _audit(60), macro=_macro(macro_ok=False))
+        result = evaluate_signal(_signal(60, 1.3), _audit(60), macro=_macro(macro_ok=False))
     assert result["recommendation"] == "MODERADO"
 
 
@@ -222,7 +239,7 @@ def test_macro_positive_adjustment_lifts_score_to_forte():
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
         result = evaluate_signal(
-            _signal(25, 2.0), _audit(65), macro=_macro(score_adjustment=10, macro_ok=True)
+            _signal(60, 2.0), _audit(65), macro=_macro(score_adjustment=10, macro_ok=True)
         )
     assert result["recommendation"] == "FORTE"
 
@@ -232,7 +249,7 @@ def test_macro_negative_adjustment_drops_score_below_forte():
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
         result = evaluate_signal(
-            _signal(25, 2.0), _audit(80), macro=_macro(score_adjustment=-15, macro_ok=True)
+            _signal(60, 2.0), _audit(80), macro=_macro(score_adjustment=-15, macro_ok=True)
         )
     assert result["recommendation"] == "MODERADO"
 
@@ -244,7 +261,7 @@ def test_macro_negative_adjustment_drops_score_below_forte():
 def test_ma200_above_30pct_overrides_to_aguardar():
     """Preco >30% acima da MA200 deve resultar em AGUARDAR (zona cara)."""
     result = evaluate_signal(
-        _signal(25, 2.0, hist_position="above_ma200", pct_from_ma200=31),
+        _signal(60, 2.0, hist_position="above_ma200", pct_from_ma200=31),
         _audit(80),
     )
     assert result["recommendation"] == "AGUARDAR"
@@ -255,7 +272,7 @@ def test_ma200_exactly_30pct_does_not_block():
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
         result = evaluate_signal(
-            _signal(25, 2.0, hist_position="above_ma200", pct_from_ma200=30),
+            _signal(60, 2.0, hist_position="above_ma200", pct_from_ma200=30),
             _audit(80),
         )
     assert result["recommendation"] == "FORTE"
@@ -272,7 +289,7 @@ def test_bloqueado_not_overridden_by_ma200_gate():
     em contradicao direta com a regra de prioridade documentada.
     """
     result = evaluate_signal(
-        _signal(20, 3.0, hist_position="above_ma200", pct_from_ma200=35),
+        _signal(60, 3.0, hist_position="above_ma200", pct_from_ma200=35),
         _audit(90, verdict="MANIPULACAO"),
     )
     assert result["recommendation"] == "BLOQUEADO"
@@ -287,7 +304,7 @@ def test_downtrend_score_below_75_blocks():
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
         result = evaluate_signal(
-            _signal(25, 2.0, hist_trend="downtrend"),
+            _signal(60, 2.0, hist_trend="downtrend"),
             _audit(72),  # 72 >= 70 qualifica FORTE inicialmente; < 75 aciona gate downtrend
         )
     assert result["recommendation"] == "AGUARDAR"
@@ -298,7 +315,7 @@ def test_downtrend_score_75_not_blocked():
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
         result = evaluate_signal(
-            _signal(25, 2.0, hist_trend="downtrend"),
+            _signal(60, 2.0, hist_trend="downtrend"),
             _audit(75),
         )
     assert result["recommendation"] in ("FORTE", "MODERADO")
@@ -311,7 +328,7 @@ def test_downtrend_score_75_not_blocked():
 def test_moderado_unapproved_ticker_downgraded_to_aguardar():
     """MODERADO em ticker sem backtest aprovado deve ser rebaixado para AGUARDAR."""
     with patch(_APPROVED, set()):
-        result = evaluate_signal(_signal(35, 1.3, ticker="XYZW3"), _audit(60))
+        result = evaluate_signal(_signal(60, 1.3, ticker="XYZW3"), _audit(60))
     assert result["recommendation"] == "AGUARDAR"
 
 
@@ -319,7 +336,7 @@ def test_forte_unapproved_ticker_not_downgraded():
     """Gate de backtest rebaixa apenas MODERADO — FORTE deve ser mantido."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
          patch(_APPROVED, set()):
-        result = evaluate_signal(_signal(25, 2.0, ticker="XYZW3"), _audit(80))
+        result = evaluate_signal(_signal(60, 2.0, ticker="XYZW3"), _audit(80))
     assert result["recommendation"] == "FORTE"
 
 
@@ -331,7 +348,7 @@ def test_forte_suppressed_in_cooldown():
     """Ticker em cooldown (4h) deve suprimir FORTE para AGUARDAR."""
     with patch(_COOLDOWN, return_value=True), patch(_REGISTER), \
          patch(_APPROVED, {"PETR4"}):
-        result = evaluate_signal(_signal(25, 2.0), _audit(80))
+        result = evaluate_signal(_signal(60, 2.0), _audit(80))
     assert result["recommendation"] == "AGUARDAR"
 
 
@@ -339,16 +356,21 @@ def test_forte_suppressed_in_cooldown():
 # Pre-gate de IA: nao auditar sinal que o RSI ja inviabiliza
 # ---------------------------------------------------------------------------
 
-def test_deserves_ai_audit_abaixo_do_moderado():
-    """RSI 29 e 37 ainda podem virar FORTE/MODERADO — vale auditar."""
-    assert deserves_ai_audit(29.0) is True
-    assert deserves_ai_audit(37.9) is True
+def test_deserves_ai_audit_dentro_da_faixa():
+    """RSI 56 e 67 ainda podem virar FORTE/MODERADO — vale auditar."""
+    assert deserves_ai_audit(56.0) is True
+    assert deserves_ai_audit(67.9) is True
 
 
-def test_deserves_ai_audit_no_limite_e_acima():
-    """O gate moderado e `rsi < 38`, entao 38 exato ja esta fora."""
-    assert deserves_ai_audit(38.0) is False
-    assert deserves_ai_audit(58.5) is False
+def test_deserves_ai_audit_fora_da_faixa():
+    """A faixa e aberta nos dois lados: 55 e 68 exatos ja estao fora.
+
+    Sobrevendido (RSI 25) tambem: era compra sob a reversao, agora nem
+    auditoria merece.
+    """
+    assert deserves_ai_audit(55.0) is False
+    assert deserves_ai_audit(68.0) is False
+    assert deserves_ai_audit(25.0) is False
 
 
 def test_deserves_ai_audit_rsi_ausente():
@@ -364,7 +386,7 @@ def test_pre_gate_coerente_com_o_gate_real():
     o pre-gate, este teste quebra em vez de silenciosamente pular auditorias
     que passariam.
     """
-    rsi_reprovado = 38.0
+    rsi_reprovado = 68.0
     assert deserves_ai_audit(rsi_reprovado) is False
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER):
         for score in (0, 55, 70, 100):
@@ -390,19 +412,19 @@ def test_impact_nao_altera_decisao(impact):
     baseada em threshold chutado.
     """
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER):
-        base = evaluate_signal(_signal(29, 2.0), _audit(score=75))
+        base = evaluate_signal(_signal(60, 2.0), _audit(score=75))
         com_impact = evaluate_signal(
-            _signal(29, 2.0), {**_audit(score=75), "impact": impact}
+            _signal(60, 2.0), {**_audit(score=75), "impact": impact}
         )
     assert com_impact["recommendation"] == base["recommendation"]
     assert com_impact["confidence"] == base["confidence"]
 
 
 def test_impact_positivo_nao_resgata_sinal_reprovado():
-    """Nem o impact maximo pode fazer um RSI reprovado virar compra."""
+    """Nem o impact maximo pode fazer um RSI fora da faixa virar compra."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER):
         result = evaluate_signal(
-            _signal(58.0, 3.0), {**_audit(score=100), "impact": 100}
+            _signal(25.0, 3.0), {**_audit(score=100), "impact": 100}
         )
     assert result["recommendation"] == "AGUARDAR"
 
@@ -411,7 +433,7 @@ def test_impact_nao_desfaz_bloqueio_por_manipulacao():
     """Invariante do CLAUDE.md sob o eixo novo: fraude nao e negociavel."""
     with patch(_COOLDOWN, return_value=False), patch(_REGISTER):
         result = evaluate_signal(
-            _signal(29, 2.0),
+            _signal(60, 2.0),
             {**_audit(score=100, verdict="MANIPULACAO"), "impact": 100},
         )
     assert result["recommendation"] == "BLOQUEADO"
@@ -432,26 +454,32 @@ def test_pregate_desligado_audita_tudo(monkeypatch):
 
 def test_pregate_ligado_volta_a_economizar(monkeypatch):
     monkeypatch.setenv("AI_PREGATE", "on")
-    assert deserves_ai_audit(58.5) is False
-    assert deserves_ai_audit(29.0) is True
+    assert deserves_ai_audit(29.0) is False
+    assert deserves_ai_audit(58.5) is True
 
 
 # ---------------------------------------------------------------------------
 # Compatibilidade entre a faixa que o scanner emite e a que a decisão aprova
 # ---------------------------------------------------------------------------
 
-def test_faixa_abaixo_do_teto_moderado_pode_virar_compra():
-    from b3.decision import RSI_MAX_MODERADO, band_can_produce_buy
+def test_faixa_do_scanner_cruza_a_faixa_de_compra():
+    """Hoje as duas pontas leem as mesmas constantes: tem que cruzar."""
+    from b3.decision import band_can_produce_buy
+    from b3.entry_rules import RSI_ENTRY_MAX, RSI_ENTRY_MIN
 
-    assert band_can_produce_buy(RSI_MAX_MODERADO - 1) is True
+    assert band_can_produce_buy(RSI_ENTRY_MIN, RSI_ENTRY_MAX) is True
 
 
-def test_faixa_acima_do_teto_moderado_nunca_vira_compra():
-    """Gates conjuntivos: acima do teto moderado nenhum score aprova compra."""
-    from b3.decision import RSI_MAX_MODERADO, band_can_produce_buy
+def test_faixa_disjunta_nunca_vira_compra():
+    """O bug original: scanner emitindo faixa que a decisao nao aprova.
 
-    assert band_can_produce_buy(RSI_MAX_MODERADO) is False
-    assert band_can_produce_buy(RSI_MAX_MODERADO + 20) is False
+    Vale nos dois sentidos — faixa toda acima ou toda abaixo da de compra.
+    """
+    from b3.decision import band_can_produce_buy
+    from b3.entry_rules import RSI_ENTRY_MAX, RSI_ENTRY_MIN
+
+    assert band_can_produce_buy(20.0, RSI_ENTRY_MIN) is False    # toda abaixo
+    assert band_can_produce_buy(RSI_ENTRY_MAX, 90.0) is False    # toda acima
 
 
 def test_sinal_no_topo_da_faixa_do_scanner_termina_em_aguardar():

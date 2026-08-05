@@ -8,7 +8,8 @@ from core.db import assert_persistence_configured, init_db, update_signal_recomm
 from b3.scanner import scanner_pro
 from core.sentiment_analyzer import analyze_news
 from b3.news_fetcher import buscar_noticias_ticker
-from b3.decision import RSI_MAX_MODERADO, deserves_ai_audit, evaluate_signal
+from b3.decision import deserves_ai_audit, evaluate_signal
+from b3.entry_rules import RSI_ENTRY_MAX, RSI_ENTRY_MIN
 from core.macro_monitor import fetch_macro_snapshot, evaluate_macro
 from b3.monitor import check_stops
 from core.alerts import TelegramAlert, send_alert
@@ -121,14 +122,13 @@ def orquestrar_investimento() -> list[dict]:
         macro_result = evaluate_macro(ticker, macro_snapshot)
 
         # PASSO 2b: Pré-gate — só busca notícia e audita se o RSI ainda permite
-        # compra. Acima de RSI_MAX_MODERADO nenhum score gera sinal (gates
-        # conjuntivos), então RSS + 3 LLMs por ticker seria desperdício. Em
-        # produção os 4 tickers do ciclo vinham com RSI 55-66, todos reprovados.
+        # compra. Fora da faixa de momentum nenhum score gera sinal (gates
+        # conjuntivos), então RSS + 3 LLMs por ticker seria desperdício.
         rsi_atual = row.get("RSI")
         if not deserves_ai_audit(rsi_atual):
             logger.info(
-                f"[{ticker}] RSI={rsi_atual:.1f} acima do limite de compra "
-                f"({RSI_MAX_MODERADO}) — sem notícia nem IA"
+                f"[{ticker}] RSI={rsi_atual:.1f} fora da faixa de compra "
+                f"({RSI_ENTRY_MIN}-{RSI_ENTRY_MAX}) — sem notícia nem IA"
             )
             audit = dict(_SKIPPED_AUDIT)
         else:

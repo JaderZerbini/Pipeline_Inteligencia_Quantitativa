@@ -7,32 +7,44 @@ import pandas_ta as ta
 from datetime import datetime, timezone
 from b3 import decision as decision_module
 from b3.decision import band_can_produce_buy
+from b3.entry_rules import RSI_ENTRY_MAX, RSI_ENTRY_MIN
 from b3.freshness import is_stale
 from core.db import save_signal
 
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
-# Backtest-approved: win_rate >= 55% AND sharpe >= 0.5 across 2 years
+# Classificação medida sob a estratégia de PRODUÇÃO — entrada de momentum
+# (RSI 55-68) e saída por trailing stop —, 10 anos, 45 a 149 trades por ticker.
+# A lista anterior vinha da tese de reversão e ficou desalinhada com a troca:
+# o B3SA3 era prioritário sendo 12º de 15 (sharpe 0.14) e o WEGE3 estava banido
+# sendo 5º (sharpe 0.57). Regerar com:
+#   python scripts/rank_tickers.py
+#
+# Critério: sharpe >= 0.5 prioritário, > 0 observação, <= 0 fora. O 0.5 é o
+# mesmo threshold que _load_approved_tickers usa em b3/decision.py — não é
+# número novo.
 TICKERS_PRIORITARIOS = [
-    "SBSP3.SA", "VALE3.SA", "ITUB4.SA",
-    "PETR4.SA", "B3SA3.SA", "BBDC4.SA",
+    "PETR4.SA", "ITUB4.SA", "VALE3.SA",
+    "SBSP3.SA", "WEGE3.SA", "BBDC4.SA",
 ]
 
-# Under observation: insufficient trade count or borderline metrics
+# Sharpe positivo mas abaixo de 0.5 — varridos, sem prioridade.
 TICKERS_OBSERVACAO = [
-    "VBBR3.SA", "GGBR4.SA", "RDOR3.SA", "EQTL3.SA",
+    "PRIO3.SA", "SUZB3.SA", "GGBR4.SA", "RENT3.SA",
+    "RDOR3.SA", "B3SA3.SA", "EQTL3.SA", "VBBR3.SA",
 ]
 
-# Permanently removed — RSI strategy consistently fails on these:
-# CSAN3, RENT3, WEGE3, SUZB3, PRIO3
+# Fora por sharpe negativo sob momentum: CSAN3 (-0.13). Perde dinheiro ajustado
+# ao risco — era o único banimento da lista antiga que a estratégia nova também
+# confirma.
+#
+# CPLE6 saiu por outro motivo: o yfinance não devolve dados para o papel.
 
 TICKERS = TICKERS_PRIORITARIOS + TICKERS_OBSERVACAO
 
-# Faixa de RSI que caracteriza o sinal de entrada deste scanner (momentum:
-# preço acima da EMA-20 com RSI subindo, mas ainda não esticado).
-RSI_ENTRY_MIN = 55
-RSI_ENTRY_MAX = 68
+# RSI_ENTRY_MIN/MAX vêm de b3.entry_rules: o backtest precisa medir a mesma
+# faixa que este scanner emite, e o módulo leve é o único que o CI importa.
 
 
 def is_market_open() -> bool:
@@ -153,12 +165,11 @@ def scanner_pro(tickers: list[str] | None = None) -> pd.DataFrame:
         print("[INFO] Mercado fechado — usando último pregão disponível")
     now_brt = datetime.now(pytz.timezone("America/Sao_Paulo"))
 
-    if not band_can_produce_buy(RSI_ENTRY_MIN):
+    if not band_can_produce_buy(RSI_ENTRY_MIN, RSI_ENTRY_MAX):
         logger.error(
             f"[ESTRATÉGIA] O scanner emite sinal com RSI entre {RSI_ENTRY_MIN} e "
-            f"{RSI_ENTRY_MAX} (momentum), mas a decisão só aprova compra com RSI "
-            f"abaixo de {decision_module.RSI_MAX_MODERADO} (reversão). As faixas "
-            f"não se cruzam: todo sinal deste ciclo terminará em AGUARDAR. "
+            f"{RSI_ENTRY_MAX}, mas essa faixa não cruza a que a decisão aprova "
+            f"como compra. Todo sinal deste ciclo terminará em AGUARDAR. "
             f"Alinhar as duas pontas é decisão de estratégia, com backtest."
         )
     print(f"Varrendo {len(raw)} tickers em busca de foguetes...")
