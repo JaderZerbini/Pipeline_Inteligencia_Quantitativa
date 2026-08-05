@@ -29,14 +29,47 @@ def test_le_aprovados_do_arquivo(monkeypatch, tmp_path):
     arquivo = tmp_path / "aprovados.json"
     arquivo.write_text(
         json.dumps({"results": [
-            {"ticker": "PETR4.SA", "win_rate": 75.0, "sharpe_ratio": 1.01},
-            {"ticker": "XPTO3.SA", "win_rate": 40.0, "sharpe_ratio": 0.1},
+            {"ticker": "PETR4.SA", "total_trades": 75,
+             "avg_return_pct": 3.19, "sharpe_ratio": 0.74},
+            {"ticker": "XPTO3.SA", "total_trades": 84,
+             "avg_return_pct": 0.14, "sharpe_ratio": 0.06},
         ]}),
         encoding="utf-8",
     )
     monkeypatch.setenv("BACKTEST_RESULTS_PATH", str(arquivo))
     aprovados = decision._load_approved_tickers()
     assert aprovados == {"PETR4"}
+
+
+def test_resultado_incompleto_nao_aprova(monkeypatch, tmp_path):
+    """Arquivo de formato antigo (só win_rate/sharpe) nao pode virar permissao.
+
+    Campo ausente reprova por default. Um JSON gerado por uma versao anterior
+    do backtester nao carrega expectancia nem contagem de trades, e aprovar
+    com base nele seria decidir compra sem os dados que o criterio exige.
+    """
+    arquivo = tmp_path / "antigo.json"
+    arquivo.write_text(
+        json.dumps({"results": [
+            {"ticker": "PETR4.SA", "win_rate": 75.0, "sharpe_ratio": 1.01},
+        ]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BACKTEST_RESULTS_PATH", str(arquivo))
+    # Nenhum aprovado -> cai no fallback, nao em conjunto vazio
+    assert decision._load_approved_tickers() == {
+        "SBSP3", "VALE3", "ITUB4", "PETR4", "B3SA3", "BBDC4"
+    }
+
+
+def test_cada_eixo_do_criterio_reprova_sozinho(monkeypatch, tmp_path):
+    """Os tres eixos sao conjuntivos: falhar em um so ja barra."""
+    bom = {"total_trades": 75, "avg_return_pct": 3.19, "sharpe_ratio": 0.74}
+    assert decision.ticker_aprovado({"ticker": "A.SA", **bom}) is True
+
+    assert decision.ticker_aprovado({**bom, "total_trades": 29}) is False
+    assert decision.ticker_aprovado({**bom, "avg_return_pct": 0.2}) is False
+    assert decision.ticker_aprovado({**bom, "sharpe_ratio": 0.49}) is False
 
 
 def test_ausencia_do_arquivo_e_erro_logado(monkeypatch, tmp_path, caplog):

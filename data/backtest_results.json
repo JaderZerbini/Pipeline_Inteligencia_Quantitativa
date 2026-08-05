@@ -1,0 +1,140 @@
+{
+  "generated_at": "2026-08-05T01:14:00.588289+00:00",
+  "results": [
+    {
+      "ticker": "PETR4.SA",
+      "total_trades": 75,
+      "win_rate": 45.33,
+      "avg_return_pct": 3.2,
+      "max_drawdown_pct": -30.49,
+      "sharpe_ratio": 0.75,
+      "period_days": 3650
+    },
+    {
+      "ticker": "VALE3.SA",
+      "total_trades": 68,
+      "win_rate": 45.59,
+      "avg_return_pct": 3.5,
+      "max_drawdown_pct": -32.4,
+      "sharpe_ratio": 0.65,
+      "period_days": 3650
+    },
+    {
+      "ticker": "ITUB4.SA",
+      "total_trades": 47,
+      "win_rate": 53.19,
+      "avg_return_pct": 3.62,
+      "max_drawdown_pct": -28.87,
+      "sharpe_ratio": 0.67,
+      "period_days": 3650
+    },
+    {
+      "ticker": "BBDC4.SA",
+      "total_trades": 64,
+      "win_rate": 45.31,
+      "avg_return_pct": 1.87,
+      "max_drawdown_pct": -31.85,
+      "sharpe_ratio": 0.49,
+      "period_days": 3650
+    },
+    {
+      "ticker": "WEGE3.SA",
+      "total_trades": 78,
+      "win_rate": 43.59,
+      "avg_return_pct": 2.5,
+      "max_drawdown_pct": -48.54,
+      "sharpe_ratio": 0.57,
+      "period_days": 3650
+    },
+    {
+      "ticker": "RENT3.SA",
+      "total_trades": 94,
+      "win_rate": 44.68,
+      "avg_return_pct": 0.86,
+      "max_drawdown_pct": -50.77,
+      "sharpe_ratio": 0.34,
+      "period_days": 3650
+    },
+    {
+      "ticker": "B3SA3.SA",
+      "total_trades": 93,
+      "win_rate": 39.78,
+      "avg_return_pct": 0.37,
+      "max_drawdown_pct": -49.33,
+      "sharpe_ratio": 0.14,
+      "period_days": 3650
+    },
+    {
+      "ticker": "SUZB3.SA",
+      "total_trades": 79,
+      "win_rate": 44.3,
+      "avg_return_pct": 1.13,
+      "max_drawdown_pct": -39.39,
+      "sharpe_ratio": 0.42,
+      "period_days": 3650
+    },
+    {
+      "ticker": "RDOR3.SA",
+      "total_trades": 45,
+      "win_rate": 40.0,
+      "avg_return_pct": 0.82,
+      "max_drawdown_pct": -31.93,
+      "sharpe_ratio": 0.26,
+      "period_days": 3650
+    },
+    {
+      "ticker": "GGBR4.SA",
+      "total_trades": 102,
+      "win_rate": 35.29,
+      "avg_return_pct": 1.07,
+      "max_drawdown_pct": -47.29,
+      "sharpe_ratio": 0.35,
+      "period_days": 3650
+    },
+    {
+      "ticker": "VBBR3.SA",
+      "total_trades": 84,
+      "win_rate": 36.9,
+      "avg_return_pct": 0.16,
+      "max_drawdown_pct": -59.8,
+      "sharpe_ratio": 0.07,
+      "period_days": 3650
+    },
+    {
+      "ticker": "PRIO3.SA",
+      "total_trades": 149,
+      "win_rate": 39.6,
+      "avg_return_pct": 1.16,
+      "max_drawdown_pct": -56.68,
+      "sharpe_ratio": 0.43,
+      "period_days": 3650
+    },
+    {
+      "ticker": "CSAN3.SA",
+      "total_trades": 89,
+      "win_rate": 34.83,
+      "avg_return_pct": -0.32,
+      "max_drawdown_pct": -63.06,
+      "sharpe_ratio": -0.12,
+      "period_days": 3650
+    },
+    {
+      "ticker": "EQTL3.SA",
+      "total_trades": 64,
+      "win_rate": 37.5,
+      "avg_return_pct": 0.34,
+      "max_drawdown_pct": -37.08,
+      "sharpe_ratio": 0.11,
+      "period_days": 3650
+    },
+    {
+      "ticker": "SBSP3.SA",
+      "total_trades": 72,
+      "win_rate": 52.78,
+      "avg_return_pct": 2.08,
+      "max_drawdown_pct": -30.29,
+      "sharpe_ratio": 0.62,
+      "period_days": 3650
+    }
+  ]
+}

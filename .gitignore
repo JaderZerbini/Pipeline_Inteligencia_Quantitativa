@@ -1,8 +1,18 @@
 # Secrets
 .env
 
-# Database and generated outputs
-data/
+# Database and generated outputs.
+# `data/*` e não `data/`: com o diretório excluído o git não desce nele, e a
+# exceção abaixo nunca seria avaliada.
+data/*
+
+# Exceção: este arquivo é gerado, mas é a fonte de verdade do gate de compra
+# de b3/decision.py. Sem versionar ele, o GitHub Actions nunca o encontra e o
+# gate cai numa lista fixa escrita à mão — decidindo compra sem backtest.
+# Versionado, a lista aprovada muda por commit revisado, não sozinha a cada
+# execução, e dá para auditar quais ativos estavam liberados em qual data.
+# Regerar de propósito com: python -m b3.backtester
+!data/backtest_results.json
 
 # Python
 venv/

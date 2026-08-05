@@ -4,26 +4,52 @@ import json
 import logging
 import os
 
+from b3.entry_rules import (
+    RSI_ENTRY_MAX,
+    RSI_ENTRY_MIN,
+    VOL_MIN_FORTE,
+    VOL_MIN_MODERADO,
+)
 from core.db import is_in_cooldown, register_cooldown
 from core.settings import ai_pregate_enabled
 
-# Thresholds de RSI dos gates de compra. Eram números mágicos inline; foram
-# nomeados para que main.py possa decidir se vale auditar sem duplicá-los.
-RSI_MAX_FORTE = 30      # compra forte exige rsi < 30
-RSI_MAX_MODERADO = 38   # compra moderada exige rsi < 38
+# Os thresholds vivem em b3/entry_rules.py, que scanner e decisão importam. Foi
+# a duplicação deles que permitiu as duas pontas divergirem: o scanner emitia
+# RSI 55-68 (momentum) enquanto aqui só passava RSI < 38 (reversão), e nenhum
+# sinal podia virar compra. Não redefina nada aqui.
+
+# --- Critérios de aprovação de ticker pelo backtest -------------------------
+# O critério era `win_rate >= 55% AND sharpe >= 0.5`, calibrado quando o
+# backtest media stop fixo com alvo de +15%: metade dos trades fechava no lucro
+# cheio e 55% era uma barra alcançável. A produção roda trailing stop **sem
+# alvo**, que corta o ganhador cedo — nessa régua a taxa de acerto fica em
+# 35-53% por construção. Medido em 10 anos: nenhum dos 15 tickers chegava a
+# 55%, então o gate aprovava zero e caía no fallback escrito à mão, para sempre.
+#
+# Sem payoff fixo, win_rate deixa de informar se dá lucro: 35% de acerto com
+# ganhador grande bate 60% com ganhador minúsculo. Trocado por expectância.
+# Nenhum número novo — os três vêm de lugares já justificados:
+APROVACAO_SHARPE_MIN = 0.5    # inalterado; era a metade sadia do critério antigo
+APROVACAO_EXPECTANCIA_MIN = 0.2   # custo round-trip estimado na B3 (emolumentos
+                                  # + liquidação + spread); abaixo disso o ativo
+                                  # opera para pagar corretagem
+APROVACAO_TRADES_MIN = 30     # abaixo disso a métrica é ruído — era 5, que com
+                              # a janela de 10 anos nenhum ticker sério ocupa
 
 
-def band_can_produce_buy(rsi_min: float) -> bool:
+def band_can_produce_buy(rsi_min: float, rsi_max: float) -> bool:
     """A faixa de RSI que o scanner emite consegue virar compra aqui?
 
-    Os gates de compra são conjuntivos e o mais folgado é o moderado, então
-    nenhum sinal com RSI acima de ``RSI_MAX_MODERADO`` vira compra por melhor
-    que seja a auditoria. Se o menor RSI que o scanner emite já está acima
-    desse teto, scanner e decisão estão medindo estratégias diferentes e o
-    pipeline não pode recomendar compra nenhuma — sintoma que precisa
-    aparecer, não ser descoberto contando `AGUARDAR` no banco.
+    Os gates de compra são conjuntivos, e ambos exigem RSI dentro da faixa de
+    momentum. Se a faixa que o scanner emite não cruza a faixa que aqui vira
+    compra, as duas pontas estão medindo estratégias diferentes e o pipeline
+    não pode recomendar compra nenhuma — sintoma que precisa aparecer, não ser
+    descoberto contando `AGUARDAR` no banco.
+
+    Hoje as duas leem as mesmas constantes, então isto sempre passa. Continua
+    aqui como trava: quem mudar um lado sem o outro quebra um teste.
     """
-    return rsi_min < RSI_MAX_MODERADO
+    return rsi_min < RSI_ENTRY_MAX and rsi_max > RSI_ENTRY_MIN
 
 
 def deserves_ai_audit(rsi: float | None) -> bool:
@@ -33,14 +59,13 @@ def deserves_ai_audit(rsi: float | None) -> bool:
     comportamento anterior ao pré-gate. É o modo de **coleta de dados** — a
     amostra viesada que o pré-gate produz não serve para calibrar `impact`.
 
-    Os dois gates de compra exigem ``rsi <`` seu threshold, e o mais folgado é
-    o moderado. Acima dele nenhum score de auditoria produz compra — os gates
-    são conjuntivos —, então buscar notícia e chamar 3 LLMs é desperdício
-    garantido.
+    Os dois gates de compra exigem RSI dentro da faixa de momentum. Fora dela
+    nenhum score de auditoria produz compra — os gates são conjuntivos —, então
+    buscar notícia e chamar 3 LLMs é desperdício garantido.
 
-    Usado por main.py para pular a auditoria. Vive aqui, junto dos thresholds
-    que ele espelha, para que afrouxar um gate sem revisar o pré-gate quebre um
-    teste em vez de passar silencioso.
+    Usado por main.py para pular a auditoria. Espelha a faixa dos gates para
+    que mudá-la sem revisar o pré-gate quebre um teste em vez de, pior, deixar
+    de auditar exatamente os sinais que podem virar compra.
 
     RSI ausente retorna False: ``evaluate_signal`` trata None como 100, que
     reprova todos os gates.
@@ -49,7 +74,7 @@ def deserves_ai_audit(rsi: float | None) -> bool:
         return True
     if rsi is None:
         return False
-    return rsi < RSI_MAX_MODERADO
+    return RSI_ENTRY_MIN < rsi < RSI_ENTRY_MAX
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +94,30 @@ def _backtest_results_path() -> str:
     return os.path.join(raiz, "data", "backtest_results.json")
 
 
+def ticker_aprovado(resultado: dict) -> bool:
+    """O ticker passa nos critérios de aprovação do backtest?
+
+    Args:
+        resultado: um item de ``data/backtest_results.json`` — dict com
+            ``total_trades``, ``avg_return_pct`` e ``sharpe_ratio``.
+
+    Os três eixos cobrem falhas diferentes: amostra insuficiente, operar sem
+    sobrar dinheiro depois do custo, e ganhar retorno tomando risco demais.
+    Campo ausente reprova (``.get`` com default reprovante) — resultado
+    incompleto não vira permissão de compra.
+    """
+    return (
+        resultado.get("total_trades", 0) >= APROVACAO_TRADES_MIN
+        and resultado.get("avg_return_pct", 0.0) > APROVACAO_EXPECTANCIA_MIN
+        and resultado.get("sharpe_ratio", 0.0) >= APROVACAO_SHARPE_MIN
+    )
+
+
 def _load_approved_tickers() -> set:
     """Loads approved tickers from backtest results file.
 
     Approval criteria (derived from metrics when no explicit 'approved' flag):
-      win_rate >= 55% AND sharpe_ratio >= 0.5
+      ver ``ticker_aprovado``
 
     Actual file format (data/backtest_results.json):
       {"results": [{"ticker": "PETR4.SA", "win_rate": 75.0, "sharpe_ratio": 1.01, ...}]}
@@ -110,7 +154,7 @@ def _load_approved_tickers() -> set:
             for r in data["results"]:
                 if r.get("approved", False):
                     approved.add(r["ticker"].replace(".SA", ""))
-                elif r.get("win_rate", 0) >= 55 and r.get("sharpe_ratio", 0) >= 0.5:
+                elif ticker_aprovado(r):
                     approved.add(r["ticker"].replace(".SA", ""))
             if not approved:
                 logger.warning("[BACKTEST] Nenhum ticker aprovado pelos critérios — usando fallback")
@@ -195,16 +239,20 @@ def evaluate_signal(signal: dict, audit: dict, macro: dict = None) -> dict:
         }
 
     # Priority 2: strong buy — oversold RSI + high volume + trusted audit
-    if rsi < RSI_MAX_FORTE and volume_ratio > 1.5 and effective_score >= 70:
+    if RSI_ENTRY_MIN < rsi < RSI_ENTRY_MAX and volume_ratio > VOL_MIN_FORTE and effective_score >= 70:
         recommendation = "FORTE"
-        reasons.append(f"RSI em zona de reversão ({rsi:.1f} < {RSI_MAX_FORTE})")
+        reasons.append(
+            f"RSI em zona de momentum ({RSI_ENTRY_MIN} < {rsi:.1f} < {RSI_ENTRY_MAX})"
+        )
         reasons.append(f"Volume {volume_ratio:.2f}x acima da média de 20 dias")
         reasons.append(f"Auditoria confiável (score={effective_score})")
 
     # Priority 3: moderate buy — RSI elevated but not extreme + decent audit
-    elif rsi < RSI_MAX_MODERADO and volume_ratio > 1.2 and effective_score >= 55:
+    elif RSI_ENTRY_MIN < rsi < RSI_ENTRY_MAX and volume_ratio > VOL_MIN_MODERADO and effective_score >= 55:
         recommendation = "MODERADO"
-        reasons.append(f"RSI favorável ({rsi:.1f} < {RSI_MAX_MODERADO})")
+        reasons.append(
+            f"RSI favorável ({RSI_ENTRY_MIN} < {rsi:.1f} < {RSI_ENTRY_MAX})"
+        )
         reasons.append(f"Volume {volume_ratio:.2f}x acima da média")
         reasons.append(f"Auditoria positiva (score={effective_score})")
 
