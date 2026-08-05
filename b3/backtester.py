@@ -1,9 +1,23 @@
-"""Historical strategy backtester aligned with the MODERADO rule in decision_engine.py.
+"""Historical strategy backtester.
 
-Entry:  RSI(14) < 38  AND  volume_ratio > 1.2
-Exit:   +15% take-profit  OR  -7% fixed stop loss from entry price
+Entry:  regra injetável de ``b3.entry_rules`` (padrão: ``momentum``, a faixa
+        de RSI que ``b3/decision.py`` aprova como compra)
+Exit:   modelo injetável de ``b3.exit_rules`` (padrão: ``trailing_producao``,
+        o trailing stop sem alvo que ``b3/monitor.py`` executa)
+
+Os dois padrões existem para uma coisa só: o JSON que este módulo grava
+alimenta o gate de compra, então ele precisa medir **a estratégia que a
+produção roda**. Já foram `reversao_moderado` e stop fixo com alvo de +15% —
+nenhum dos dois existia no pipeline, e o gate aprovava ativos com base em
+evidência de uma estratégia que ninguém executava.
+
+A regra de entrada era fixa no laço de simulação, o que impedia rodar teses
+diferentes na mesma régua. Agora entrada e saída entram por parâmetro — mesmos
+tickers, mesmo período, para qualquer combinação.
 
 RSI is computed with Wilder's exponential smoothing — no TA-Lib or pandas_ta.
+A EMA-20 usa ``pandas_ta`` porque é a mesma função que ``b3/scanner.py`` chama:
+a tese de momentum precisa ser medida com o indicador que a produção emite.
 """
 
 import json
@@ -12,12 +26,32 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
+import pandas_ta as ta
 import yfinance as yf
+
+from b3.decision import (
+    APROVACAO_EXPECTANCIA_MIN,
+    APROVACAO_SHARPE_MIN,
+    APROVACAO_TRADES_MIN,
+    ticker_aprovado,
+)
+from b3.entry_rules import Candle, momentum
+from b3.exit_rules import trailing_producao
 
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 _DATA_DIR    = Path("data")
 _RESULTS_PATH = _DATA_DIR / "backtest_results.json"
+
+# Período da régua de produção. O JSON salvo alimenta o gate de compra, então
+# só um run com este período (e a regra de produção) pode sobrescrevê-lo.
+#
+# Eram 730 dias (2 anos), e nessa janela o n por ticker ficava entre 7 e 16
+# trades — o gate decidia alocação de capital por ativo sobre uma amostra em
+# que uma operação muda a taxa de acerto em mais de 6 pontos. Com 10 anos vai
+# para 45-149. Não custa nada: o tempo é dominado pelo round-trip da rede, não
+# pelo volume (0,68s contra 0,75s por ticker na medição).
+_DEFAULT_PERIOD_DAYS = 3650
 
 _DEFAULT_TICKERS = [
     "PETR4.SA", "VALE3.SA", "ITUB4.SA", "BBDC4.SA",
@@ -81,18 +115,19 @@ def _print_summary(results: list[dict]) -> None:
         ))
     print(rule)
 
-    # ── Recommended tickers (minimum viability threshold) ──────────────────
-    worthy = [
-        r for r in results
-        if r["total_trades"] >= 5
-        and r["win_rate"]    >= 55.0
-        and r["sharpe_ratio"] >= 0.5
-    ]
+    # Critério importado de b3.decision: esta tabela mostrava trades>=5,
+    # win_rate>=55% e sharpe>=0.5 numa cópia própria, então quem lesse a saída
+    # veria uma lista diferente da que o gate de compra realmente aprova.
+    worthy = [r for r in results if ticker_aprovado(r)]
     print("\nATIVOS QUE MERECEM MONITORAMENTO ATIVO")
-    print("  (criterio: trades>=5 | win_rate>=55% | sharpe>=0.5)")
+    print(f"  (criterio do gate: trades>={APROVACAO_TRADES_MIN} | "
+          f"avg_ret>{APROVACAO_EXPECTANCIA_MIN}% | "
+          f"sharpe>={APROVACAO_SHARPE_MIN})")
     print(sep)
     if worthy:
-        for r in sorted(worthy, key=lambda x: x["win_rate"], reverse=True):
+        # Ordenado por sharpe, nao por win_rate: sem alvo fixo a taxa de acerto
+        # nao ordena qualidade — foi o que quebrou o criterio antigo.
+        for r in sorted(worthy, key=lambda x: x["sharpe_ratio"], reverse=True):
             print(fmt.format(
                 r["ticker"],
                 r["total_trades"],
@@ -122,15 +157,31 @@ def _save_results(results: list[dict]) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
-def run_backtest(ticker: str, period_days: int = 730) -> dict | None:
-    """Simulate the MODERADO entry rule on historical data for a single ticker.
+def run_backtest(
+    ticker: str,
+    period_days: int = _DEFAULT_PERIOD_DAYS,
+    entry_rule=momentum,
+    exit_rule=trailing_producao,
+    detail: bool = False,
+) -> dict | None:
+    """Simulate an entry rule on historical data for a single ticker.
 
     Downloads ``period_days + 60`` calendar days so indicators have a 60-day
     warm-up window, then restricts the simulation to the requested period.
 
     Args:
         ticker:      yfinance symbol, e.g. ``'PETR4.SA'``.
-        period_days: Calendar days of history to simulate; default 730 (2 years).
+        period_days: Calendar days of history to simulate; default 3650 (10 anos).
+        entry_rule:  Callable de ``b3.entry_rules`` que recebe um ``Candle`` e
+                     devolve True quando a vela abre posição. O padrão espelha
+                     a faixa de RSI que ``b3/decision.py`` aprova como compra.
+        exit_rule:   Modelo de saída de ``b3.exit_rules``. O padrão espelha o
+                     trailing stop de ``b3/monitor.py``; ``no_fechamento`` e
+                     ``intradiaria`` existem para comparação nos estudos.
+        detail:      Acrescenta ``trades`` (lista, com data de entrada) e
+                     ``equity`` (Series diária) ao retorno. Necessário para
+                     fatiar por regime e correlacionar estratégias; fora do
+                     padrão porque nenhum dos dois é serializável em JSON.
 
     Returns:
         Metrics dict, or ``None`` when data is unavailable or insufficient.
@@ -167,12 +218,31 @@ def run_backtest(ticker: str, period_days: int = 730) -> dict | None:
 
     # --- Indicators ---
     df["RSI"] = _compute_rsi(df["Close"])
+    # Mesma chamada de scanner.py:192 — a tese de momentum compara preço contra
+    # esta EMA, então recalculá-la de outro jeito mediria outra estratégia.
+    df["EMA_20"] = ta.ema(df["Close"], length=20)
 
     vol_avg_20 = df["Volume"].rolling(20).mean()
     # Replace zero average with NaN to avoid ±inf in the ratio
     df["volume_ratio"] = df["Volume"] / vol_avg_20.replace(0.0, float("nan"))
 
+    # EMA_20 fica fora do dropna de propósito: regra que não usa EMA não deve
+    # perder velas por causa dela. Quem usa recebe None e não entra.
     df = df.dropna(subset=["RSI", "volume_ratio"]).copy()
+
+    # Vela do pregão em andamento vem do yfinance com Open/High/Low ZERADOS e
+    # só o Close preenchido. Os modelos de saída leem OHLC: `abertura=0` passa
+    # em `abertura <= nivel_stop` sempre, e a posição aberta "sai" a preço zero
+    # — um trade de -100% inventado, que desloca a média de um ticker inteiro.
+    # O simulador antigo só lia Close e nunca esbarrou nisso.
+    ohlc = [c for c in ("Open", "High", "Low") if c in df.columns]
+    if ohlc:
+        validas = (df[ohlc] > 0).all(axis=1)
+        if not validas.all():
+            descartadas = (~validas).sum()
+            print(f"[INFO] {ticker}: {descartadas} vela(s) sem OHLC completo "
+                  f"descartada(s) — provavelmente pregão em andamento")
+            df = df[validas].copy()
 
     # Restrict simulation to the requested calendar window
     df = df[df.index >= pd.Timestamp(end - timedelta(days=period_days))].copy()
@@ -182,10 +252,19 @@ def run_backtest(ticker: str, period_days: int = 730) -> dict | None:
         return None
 
     # --- Simulation ---
+    # Séries sem OHLC completo caem no fechamento nos quatro campos: o modelo
+    # `no_fechamento` ignora abertura/máxima/mínima, então o resultado é
+    # idêntico ao histórico. Modelo intradiário sobre dado assim viraria
+    # `no_fechamento` disfarçado — por isso o aviso.
+    tem_ohlc = {"Open", "High", "Low"}.issubset(df.columns)
+    if not tem_ohlc and exit_rule is not trailing_producao:
+        print(f"[WARN] {ticker}: série sem OHLC — saída intradiária indisponível")
+
     # Equity curve is normalised to 1.0; one position at a time.
     trades:        list[dict] = []
     in_position:   bool  = False
     entry_price:   float = 0.0
+    peak_price:    float = 0.0   # topo desde a entrada, para o trailing stop
     entry_date           = None
     current_value: float = 1.0
 
@@ -198,21 +277,44 @@ def run_backtest(ticker: str, period_days: int = 730) -> dict | None:
         date      = df.index[i]
 
         if in_position:
-            ret = (price - entry_price) / entry_price
-            if ret >= _TAKE_PROFIT or ret <= -_STOP_LOSS:
+            maxima = float(df["High"].iloc[i]) if tem_ohlc else price
+            saida = exit_rule(
+                entry_price,
+                peak_price,
+                float(df["Open"].iloc[i]) if tem_ohlc else price,
+                maxima,
+                float(df["Low"].iloc[i]) if tem_ohlc else price,
+                price,
+                _TAKE_PROFIT,
+                _STOP_LOSS,
+            )
+            # Atualiza o topo só depois de checar: com barra diária não se sabe
+            # se a máxima veio antes ou depois da queda, e assumir a sequência
+            # inventaria disparos. Ver docstring de trailing_producao.
+            peak_price = max(peak_price, maxima)
+            if saida is not None:
+                ret = (saida.preco - entry_price) / entry_price
                 current_value *= (1.0 + ret)
                 trades.append({
                     "entry_date": str(entry_date.date()),
                     "exit_date":  str(date.date()),
                     "return_pct": round(ret * 100.0, 2),
                     "win":        ret > 0,
+                    "motivo":     saida.motivo,
                 })
                 in_position = False
         else:
-            # Entry rule mirrors decision_engine MODERADO conditions
-            if rsi < 38.0 and vol_ratio > 1.2:
+            ema20 = float(df["EMA_20"].iloc[i])
+            candle = Candle(
+                price=price,
+                rsi=rsi,
+                volume_ratio=vol_ratio,
+                ema20=None if pd.isna(ema20) else ema20,
+            )
+            if entry_rule(candle):
                 in_position = True
                 entry_price = price
+                peak_price  = price
                 entry_date  = date
 
         equity.iloc[i] = current_value
@@ -234,7 +336,7 @@ def run_backtest(ticker: str, period_days: int = 730) -> dict | None:
     total_trades = len(trades)
 
     if total_trades == 0:
-        return {
+        vazio = {
             "ticker":           ticker,
             "total_trades":     0,
             "win_rate":         0.0,
@@ -243,6 +345,12 @@ def run_backtest(ticker: str, period_days: int = 730) -> dict | None:
             "sharpe_ratio":     0.0,
             "period_days":      period_days,
         }
+        if detail:
+            # Curva plana ainda serve: a correlação entre duas estratégias
+            # precisa das duas séries alinhadas no mesmo calendário.
+            vazio["trades"] = []
+            vazio["equity"] = equity
+        return vazio
 
     ret_list   = [t["return_pct"] for t in trades]
     win_rate   = sum(t["win"] for t in trades) / total_trades * 100.0
@@ -257,7 +365,7 @@ def run_backtest(ticker: str, period_days: int = 730) -> dict | None:
     if len(daily_ret) > 1 and float(daily_ret.std()) > 0.0:
         sharpe = float((daily_ret.mean() / daily_ret.std()) * (252 ** 0.5))
 
-    return {
+    resultado = {
         "ticker":           ticker,
         "total_trades":     total_trades,
         "win_rate":         round(win_rate, 2),
@@ -266,18 +374,55 @@ def run_backtest(ticker: str, period_days: int = 730) -> dict | None:
         "sharpe_ratio":     round(sharpe, 2),
         "period_days":      period_days,
     }
+    if detail:
+        # Fora do dict padrão de propósito: `trades` e `equity` não são
+        # serializáveis em JSON e não podem vazar para backtest_results.json.
+        resultado["trades"] = trades
+        resultado["equity"] = equity
+    return resultado
 
 
-def run_full_backtest(tickers: list[str] | None = None) -> list[dict]:
+def run_full_backtest(
+    tickers: list[str] | None = None,
+    period_days: int = _DEFAULT_PERIOD_DAYS,
+    entry_rule=momentum,
+    exit_rule=trailing_producao,
+    save: bool = True,
+) -> list[dict]:
     """Run ``run_backtest()`` for each ticker, print a summary table, and save JSON.
 
     Args:
-        tickers: yfinance symbols to test. Defaults to ``_DEFAULT_TICKERS`` when
-                 ``None`` is passed.
+        tickers:     yfinance symbols to test. Defaults to ``_DEFAULT_TICKERS``
+                     when ``None`` is passed.
+        period_days: Calendar days of history to simulate.
+        entry_rule:  Regra de entrada de ``b3.entry_rules``.
+        save:        Grava ``data/backtest_results.json``. Só é permitido com a
+                     régua de produção — ver ValueError abaixo.
+
+    Raises:
+        ValueError: quando ``save`` é pedido com regra ou período que não são os
+            de produção. Esse JSON alimenta o gate de compra de
+            ``b3/decision.py``: gravar ali o resultado de um run de pesquisa
+            faria a produção aprovar compra com base numa estratégia que ela não
+            roda — corrupção silenciosa, com dinheiro real. Runs de pesquisa
+            passam ``save=False``.
 
     Returns:
         List of result dicts, one per ticker that returned valid data.
     """
+    if save and (
+        entry_rule is not momentum
+        or exit_rule is not trailing_producao
+        or period_days != _DEFAULT_PERIOD_DAYS
+    ):
+        raise ValueError(
+            f"save=True exige a régua de produção (momentum, "
+            f"trailing_producao, {_DEFAULT_PERIOD_DAYS} dias); recebido "
+            f"({getattr(entry_rule, '__name__', entry_rule)}, "
+            f"{getattr(exit_rule, '__name__', exit_rule)}, {period_days} dias). "
+            f"Use save=False para pesquisa — {_RESULTS_PATH} alimenta o gate de compra."
+        )
+
     if tickers is None:
         tickers = _DEFAULT_TICKERS
 
@@ -285,8 +430,12 @@ def run_full_backtest(tickers: list[str] | None = None) -> list[dict]:
     results: list[dict] = []
 
     for ticker in tickers:
-        print(f"  → {ticker}...", end=" ", flush=True)
-        result = run_backtest(ticker)
+        # ASCII de proposito: o console do Windows usa cp1252 por padrao e
+        # `->` em unicode derrubava `python -m b3.backtester` com
+        # UnicodeEncodeError — justamente o comando que gera o JSON do gate.
+        print(f"  -> {ticker}...", end=" ", flush=True)
+        result = run_backtest(ticker, period_days=period_days,
+                              entry_rule=entry_rule, exit_rule=exit_rule)
         if result is not None:
             results.append(result)
             print(
@@ -297,7 +446,10 @@ def run_full_backtest(tickers: list[str] | None = None) -> list[dict]:
 
     if results:
         _print_summary(results)
-        _save_results(results)
+        if save:
+            _save_results(results)
+        else:
+            print("\n[PESQUISA] save=False — data/backtest_results.json intacto.")
     else:
         print("\nNenhum resultado disponível.")
 
