@@ -482,12 +482,20 @@ def test_faixa_disjunta_nunca_vira_compra():
     assert band_can_produce_buy(RSI_ENTRY_MAX, 90.0) is False    # toda acima
 
 
-def test_sinal_no_topo_da_faixa_do_scanner_termina_em_aguardar():
-    """Documenta o descasamento atual: scanner emite 55-68, decisão exige <38.
+def test_sinal_tipico_do_scanner_vira_compra():
+    """O inverso do que este teste afirmava antes da troca de estrategia.
 
-    Não é asserção sobre a estratégia certa — é o registro de que, enquanto as
-    duas faixas não se cruzarem, nenhum sinal do scanner pode virar compra.
+    Enquanto a decisao exigia RSI < 38 e o scanner emitia 55-68, nenhum sinal
+    podia virar compra e este caso terminava em AGUARDAR. Com as duas pontas
+    alinhadas no momentum, o mesmo sinal e uma compra.
+
+    O cooldown precisa ser mockado: sem isso o teste consulta o SQLite real,
+    passa por acidente quando existe cooldown gravado e quebra onde nao ha
+    banco. Foi assim que ele sobreviveu a troca de estrategia sem ser notado.
     """
     signal = _signal(rsi=60.0, volume_ratio=2.0)
     audit = {"score": 95, "verdict": "CONFIAVEL", "flags": []}
-    assert evaluate_signal(signal, audit)["recommendation"] == "AGUARDAR"
+
+    with patch(_COOLDOWN, return_value=False), patch(_REGISTER), \
+         patch(_APPROVED, {"PETR4"}):
+        assert evaluate_signal(signal, audit)["recommendation"] == "FORTE"
