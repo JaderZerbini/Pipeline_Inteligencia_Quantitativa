@@ -30,7 +30,13 @@ import pandas_ta as ta
 from b3 import backtester as bt
 from b3.backtester import _DEFAULT_TICKERS
 from b3.entry_rules import momentum, reversao_moderado
-from b3.exit_rules import intradiaria, no_fechamento, trailing_producao
+from b3.exit_rules import (
+    com_niveis,
+    intradiaria,
+    no_fechamento,
+    trailing_com_alvo,
+    trailing_producao,
+)
 
 # Comparacao de teses de entrada. Os estudos de EMA, ADX e volume existiram,
 # responderam sua pergunta e foram removidos — os numeros estao em
@@ -51,11 +57,24 @@ _SAIDA_ATIVA = no_fechamento
 # Estudo de saída: a entrada fica fixa (momentum, a candidata) e o que varia é
 # o modelo de execução da saída. Misturar os dois eixos na mesma tabela
 # impediria saber qual dos dois causou a diferença.
+#
+# As três últimas linhas separam os dois eixos que a tabela 3.3 de
+# ESTRATEGIA.md deixou colados. `trailing + alvo` mantém o stop móvel e
+# acrescenta o alvo; as duas varreduras mantêm tudo e só mexem na distância do
+# stop, para saber se -7% é um número escolhido ou herdado.
 _SAIDAS = {
-    "fechamento (atual)":   no_fechamento,
-    "stop intradiario":     intradiaria,
-    "trailing (producao)":  trailing_producao,
+    "fechamento (atual)":    no_fechamento,
+    "stop intradiario":      intradiaria,
+    "trailing (producao)":   trailing_producao,
+    "trailing + alvo 15%":   trailing_com_alvo,
+    "trailing -5% do topo":  com_niveis(trailing_producao, sl_pct=0.05),
+    "trailing -10% do topo": com_niveis(trailing_producao, sl_pct=0.10),
 }
+
+# Larguras da varredura (--estudo varredura). Passo de 1 p.p. na região onde o
+# valor de produção mora, e pontos esparsos depois só para ver a forma da curva
+# — não para escolher entre eles.
+_LARGURAS = (0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.12, 0.15)
 
 # Abaixo disto a métrica é ruído com aparência de tabela. Não é regra de
 # mercado, é estatística: win rate sobre 8 trades muda 12 p.p. com um trade.
@@ -215,9 +234,102 @@ def estudo_saida(tickers: list[str], period_days: int, custo_pct: float) -> None
     print("  os dois modelos no retorno é o preço de ter proteção de verdade.")
 
 
+def estudo_varredura(tickers: list[str], period_days: int, custo_pct: float) -> None:
+    """Varre a largura do trailing para saber onde o -7% herdado se situa.
+
+    O -7% entrou no primeiro commit do monitor e nunca foi medido. Esta
+    varredura mede — mas o pico dela **não é** a resposta: escolher o máximo de
+    uma varredura é overfitting por construção, e aqui é overfitting com
+    dinheiro real. Por isso cada largura também é medida nas duas metades do
+    período em separado. Largura que só vence numa metade venceu por sorte de
+    amostra, e a produção não roda em amostras passadas.
+    """
+    print("\n" + "=" * 78)
+    print("VARREDURA DA LARGURA DO TRAILING - entrada fixa em momentum")
+    print("=" * 78)
+
+    corte = (pd.Timestamp.today() - pd.Timedelta(days=period_days // 2)).date().isoformat()
+
+    resultados: dict[str, list[dict]] = {}
+    curvas: dict[str, list] = {}
+    for largura in _LARGURAS:
+        rotulo = f"-{largura * 100:g}% do topo"
+        saida = com_niveis(trailing_producao, sl_pct=largura)
+        trades: list[dict] = []
+        curvas[rotulo] = []
+        print(f"\n[{rotulo}]", end=" ", flush=True)
+        for ticker in tickers:
+            print(".", end="", flush=True)
+            r = bt.run_backtest(ticker, period_days=period_days,
+                                entry_rule=momentum, exit_rule=saida, detail=True)
+            if r is None:
+                continue
+            for t in r["trades"]:
+                t["return_liq_pct"] = t["return_pct"] - custo_pct
+                trades.append(t)
+            curvas[rotulo].append(r["equity"])
+        resultados[rotulo] = trades
+
+    print("\n\n-- Período inteiro " + "-" * 58)
+    for rotulo, trades in resultados.items():
+        print(_linha(rotulo, _metricas(trades)))
+
+    print("\n-- Cauda esquerda " + "-" * 59)
+    for rotulo, trades in resultados.items():
+        m = _metricas(trades)
+        if m["n"]:
+            print(
+                f"  {rotulo:<22} freq<{_LIMIAR_GAP_PCT}%={m['gap_pct']:>5.1f}%  "
+                f"perda média nesses={m['perda_media_gap']:>7.2f}%  "
+                f"p5={m['p5']:>7.2f}%  pior={m['pior']:>7.2f}%"
+            )
+
+    print("\n-- Carteira equal-weight: o que o capital fez no TEMPO " + "-" * 23)
+    print("   Retorno/trade premia quem opera menos e segura mais. Aqui o")
+    print("   denominador e o mesmo periodo de 10 anos para todas as larguras.")
+    for rotulo, series in curvas.items():
+        if not series:
+            continue
+        # Capital ocioso vale 1.0 antes do primeiro pregão do ticker.
+        carteira = pd.concat(series, axis=1).ffill().fillna(1.0).mean(axis=1)
+        n = _metricas(resultados[rotulo])["n"]
+        # A curva do backtester é BRUTA. O custo entra aqui: cada trade paga
+        # custo_pct, e a carteira tem `len(series)` posições equal-weight.
+        drag = (1.0 - custo_pct / 100.0) ** (n / len(series))
+        diario = carteira.pct_change().dropna()
+        pico = carteira.cummax()
+        print(
+            f"  {rotulo:<22} "
+            f"bruto={(carteira.iloc[-1] - 1) * 100:>7.0f}%  "
+            f"liquido={(carteira.iloc[-1] * drag - 1) * 100:>7.0f}%  "
+            f"DD max={((carteira / pico - 1).min()) * 100:>6.1f}%  "
+            f"sharpe={(diario.mean() / diario.std() * (252 ** 0.5)):>5.2f}"
+        )
+
+    print(f"\n-- Estabilidade: metade 1 (ate {corte}) vs metade 2 " + "-" * 24)
+    print("   Ranking que troca entre as metades = o vencedor do periodo")
+    print("   inteiro foi sorte de amostra, nao regra de mercado.")
+    for rotulo, trades in resultados.items():
+        m1 = _metricas([t for t in trades if t["entry_date"] < corte])
+        m2 = _metricas([t for t in trades if t["entry_date"] >= corte])
+        print(
+            f"  {rotulo:<22} "
+            f"1a: n={m1['n']:>4} avg={m1['avg']:>6.2f}% +-{m1['ep']:.2f}   "
+            f"2a: n={m2['n']:>4} avg={m2['avg']:>6.2f}% +-{m2['ep']:.2f}"
+        )
+
+    print("\n" + "=" * 78)
+    print("LEITURA")
+    print("=" * 78)
+    print("  Um erro padrao (+-) cobre ~68% da incerteza da media. Duas larguras")
+    print("  cujas faixas se sobrepoem nao foram distinguidas por este teste,")
+    print("  por maior que pareca a diferenca entre os numeros centrais.")
+
+
 def _metricas(trades: list[dict], chave: str = "return_liq_pct") -> dict:
     if not trades:
-        return {"n": 0, "win_rate": 0.0, "avg": 0.0, "mediana": 0.0, "pior": 0.0,
+        return {"n": 0, "win_rate": 0.0, "avg": 0.0, "ep": 0.0, "soma": 0.0,
+                "mediana": 0.0, "pior": 0.0,
                 "p5": 0.0, "gap_pct": 0.0, "perda_media_gap": 0.0}
     rets = [t[chave] for t in trades]
     wins = sum(1 for r in rets if r > 0)
@@ -226,6 +338,14 @@ def _metricas(trades: list[dict], chave: str = "return_liq_pct") -> dict:
         "n":        len(trades),
         "win_rate": wins / len(trades) * 100.0,
         "avg":      sum(rets) / len(rets),
+        # Erro padrão da média: sem ele, duas médias diferentes podem ser a
+        # mesma amostra. Foi o que derrubou o estudo de volume (ver ESTRATEGIA).
+        "ep":       float(pd.Series(rets).std(ddof=1)) / len(rets) ** 0.5
+                    if len(rets) > 1 else 0.0,
+        # Soma dos retornos: média/trade não é comparável entre modelos que
+        # operam n muito diferente na MESMA janela de 10 anos. Aproxima o que a
+        # carteira acumulou; ignora composição, mas ordena certo.
+        "soma":     sum(rets),
         "mediana":  float(pd.Series(rets).median()),
         "pior":     min(rets),
         "p5":       float(pd.Series(rets).quantile(0.05)),
@@ -241,8 +361,8 @@ def _linha(rotulo: str, m: dict) -> str:
         return f"  {rotulo:<22} nenhum trade"
     return (
         f"  {rotulo:<22} n={m['n']:>4}  win={m['win_rate']:>5.1f}%  "
-        f"avg={m['avg']:>6.2f}%  med={m['mediana']:>6.2f}%  "
-        f"pior={m['pior']:>7.2f}%{alerta}"
+        f"avg={m['avg']:>6.2f}% +-{m['ep']:.2f}  med={m['mediana']:>6.2f}%  "
+        f"acum={m['soma']:>7.0f}%  pior={m['pior']:>7.2f}%{alerta}"
     )
 
 
@@ -342,7 +462,7 @@ def main() -> None:
     p.add_argument("--custo", type=float, default=_CUSTO_PADRAO_PCT,
                    help="custo round-trip por trade em %% (padrão: 0.2)")
     p.add_argument("--tickers", nargs="*", default=None, help="override do universo")
-    p.add_argument("--estudo", choices=sorted(_ESTUDOS) + ["saida"], default="base",
+    p.add_argument("--estudo", choices=sorted(_ESTUDOS) + ["saida", "varredura"], default="base",
                    help="conjunto de regras a comparar (padrão: base)")
     p.add_argument("--saida", choices=sorted(_SAIDAS), default="fechamento (atual)",
                    help="modelo de saída nos estudos de entrada")
@@ -358,6 +478,10 @@ def main() -> None:
 
     if args.estudo == "saida":
         estudo_saida(tickers, period_days, args.custo)
+        return
+
+    if args.estudo == "varredura":
+        estudo_varredura(tickers, period_days, args.custo)
         return
 
     global _REGRAS

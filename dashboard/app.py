@@ -23,6 +23,7 @@ from core.db import (
     save_operation,
 )
 from b3.decision import BACKTEST_APPROVED
+from b3.monitor import TRAILING_STOP_PCT, nivel_stop
 from main import orquestrar_investimento
 
 st.set_page_config(page_title="Terminal Quant - Auditoria Automática", layout="wide")
@@ -366,8 +367,7 @@ with tab_ops:
         submitted    = st.form_submit_button("Registrar Compra")
 
         if submitted and entry_price > 0:
-            stop_price   = round(entry_price * 0.93, 2)
-            target_price = round(entry_price * 1.15, 2)
+            stop_price   = round(nivel_stop(entry_price), 2)
             save_operation(
                 signal_id=None,
                 ticker=ticker_val,
@@ -381,7 +381,12 @@ with tab_ops:
             st.success(
                 f"✅ Operação registrada!  \n"
                 f"Stop loss: R$ {stop_price:.2f} (sair se cair até aqui)  \n"
-                f"Alvo: R$ {target_price:.2f} (realizar lucro aqui)  \n"
+                # Não anunciar alvo: não existe take profit em b3/monitor.py, e
+                # prometer um preço de realização que o robô não executa é pior
+                # que não dizer nada — o usuário fecharia a posição na mão.
+                f"Sem alvo fixo: o robô vende quando o preço devolver "
+                f"{TRAILING_STOP_PCT * 100:.0f}% do ponto mais alto que atingir. "
+                f"O stop acima sobe junto com o papel.  \n"
                 f"Posição: {quantity} ações × R$ {entry_price:.2f} = R$ {quantity * entry_price:,.2f}"
             )
 
@@ -393,17 +398,25 @@ with tab_ops:
     if open_ops:
         rows = []
         for op in open_ops:
+            # Fora do try: o preço de entrada vem do banco e não depende da rede.
+            # Dentro, um ticker que falhasse deixaria `entry` valendo o do
+            # ticker anterior — o stop exibido seria de outra posição.
+            entry = op.get("entry_price") or 0.0
             try:
                 current    = yf.Ticker(f"{op['ticker']}.SA").fast_info.last_price
-                entry      = op.get("entry_price") or 0.0
                 unreal_pct = round(((current - entry) / entry) * 100, 2) if entry else None
             except Exception:
                 current    = None
                 unreal_pct = None
+            # O stop vivo mede do topo, não da entrada: `stop_price` do banco é
+            # o nível da compra e nunca é atualizado. Mostrá-lo faria o painel
+            # prometer um preço de saída que o monitor não executa mais.
+            topo = op.get("peak_price") or entry
             rows.append({
                 "Ticker":                op["ticker"],
                 "Entrada (R$)":          op.get("entry_price"),
-                "Stop (R$)":             op.get("stop_price"),
+                "Topo (R$)":             round(topo, 2) if topo else None,
+                "Stop (R$)":             round(nivel_stop(topo), 2) if topo else None,
                 "Atual (R$)":            current,
                 "P&L nao realizado (%)": unreal_pct,
             })

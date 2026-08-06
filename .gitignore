@@ -1,6 +1,11 @@
 # Secrets
 .env
 
+# Material de trabalho que não deve subir: prints de conversa, exports, anexos.
+# A pasta se chama "naosubir" desde sempre, mas não estava ignorada — os prints
+# do Telegram entrariam num `git add -A`.
+gerados_naosubir/
+
 # Database and generated outputs.
 # `data/*` e não `data/`: com o diretório excluído o git não desce nele, e a
 # exceção abaixo nunca seria avaliada.

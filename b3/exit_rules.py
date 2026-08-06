@@ -16,7 +16,14 @@ Só stdlib, sem pandas — testável no CI, mesmo padrão de `b3/entry_rules.py`
 
 from typing import NamedTuple
 
-__all__ = ["Saida", "intradiaria", "no_fechamento", "trailing_producao"]
+__all__ = [
+    "Saida",
+    "com_niveis",
+    "intradiaria",
+    "no_fechamento",
+    "trailing_com_alvo",
+    "trailing_producao",
+]
 
 
 class Saida(NamedTuple):
@@ -138,3 +145,70 @@ def trailing_producao(
     if minima <= nivel:
         return Saida(nivel, "stop")
     return None
+
+
+def trailing_com_alvo(
+    entrada: float,
+    pico: float,
+    abertura: float,
+    maxima: float,
+    minima: float,
+    fechamento: float,
+    tp_pct: float,
+    sl_pct: float,
+) -> Saida | None:
+    """Meio-termo entre os dois modelos medidos: ratchet do trailing + alvo fixo.
+
+    A tabela 3.3 de ESTRATEGIA.md compara dois extremos, e nenhum domina: o
+    stop fixo com alvo rende +2,02%/trade contra +1,16% do trailing, mas com o
+    dobro da frequência de perda além de -10%. Os dois eixos que os separam são
+    independentes — o **stop** (fixo na entrada vs móvel do topo) e o **alvo**
+    (existe vs não existe). Esta variante isola isso: fica com o stop móvel, que
+    é de onde vem a cauda menor, e acrescenta o alvo, de onde provavelmente vem
+    o retorno maior.
+
+    Regras, na ordem de `intradiaria` — inclusive o empate conservador, que aqui
+    importa mais: o stop móvel sobe para perto do alvo, então candles que tocam
+    os dois níveis ficam comuns, não raros.
+
+    ``pico`` segue a mesma convenção de ``trailing_producao``: topo dos pregões
+    anteriores, atualizado por quem chama **depois** desta checagem.
+    """
+    nivel_stop = pico * (1.0 - sl_pct)
+    nivel_tp = entrada * (1.0 + tp_pct)
+
+    if abertura <= nivel_stop:
+        return Saida(abertura, "gap_baixa")
+    if abertura >= nivel_tp:
+        return Saida(abertura, "gap_alta")
+
+    if minima <= nivel_stop:
+        return Saida(nivel_stop, "stop")
+    if maxima >= nivel_tp:
+        return Saida(nivel_tp, "take_profit")
+    return None
+
+
+def com_niveis(saida, *, tp_pct: float = None, sl_pct: float = None):
+    """Fixa ``tp_pct``/``sl_pct`` de um modelo, para varrer parâmetro.
+
+    O backtester passa as constantes ``_TAKE_PROFIT``/``_STOP_LOSS`` em toda
+    chamada. Sem isto, comparar -5% contra -10% exigiria mexer nessas constantes
+    entre execuções — global mutável no meio de um estudo, com resultado
+    dependendo da ordem em que as regras rodaram.
+
+    O que **não** for passado continua vindo de quem chama, para a variante não
+    congelar silenciosamente um parâmetro que o estudo não estava variando.
+    """
+    def wrapper(entrada, pico, abertura, maxima, minima, fechamento, tp, sl):
+        return saida(
+            entrada, pico, abertura, maxima, minima, fechamento,
+            tp if tp_pct is None else tp_pct,
+            sl if sl_pct is None else sl_pct,
+        )
+
+    base = getattr(saida, "__name__", str(saida))
+    marcas = [f"{rot}={pct * 100:g}" for rot, pct in (("tp", tp_pct), ("sl", sl_pct))
+              if pct is not None]
+    wrapper.__name__ = f"{base}[{', '.join(marcas)}]"
+    return wrapper

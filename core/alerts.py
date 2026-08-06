@@ -50,6 +50,29 @@ def _get_bot() -> tuple[Bot | None, str | None]:
 # Public API
 # ---------------------------------------------------------------------------
 
+async def _entregar(bot, chat_id_raw: str, message: str) -> list[str]:
+    """Envia `message` a cada destinatário de `chat_id_raw`. Devolve quem recebeu.
+
+    `TELEGRAM_CHAT_ID` aceita vários ids separados por vírgula, e cada envio é
+    isolado do outro **de propósito**: um destinatário que bloqueou o bot, ou
+    cujo id está errado, faz a API levantar. Sem o try por destinatário essa
+    exceção aborta o loop e cala todo mundo que vem depois na lista — o alerta
+    não chega a ninguém e o único vestígio é uma linha de log.
+
+    Fonte única para `send_alert` e para `TelegramAlert`: enquanto a classe
+    tinha o seu próprio envio, ela mandava a lista inteira como um id só.
+    """
+    entregues: list[str] = []
+    for cid in [c.strip() for c in (chat_id_raw or "").split(",") if c.strip()]:
+        try:
+            await bot.send_message(chat_id=cid, text=message, parse_mode="Markdown")
+            entregues.append(cid)
+        except Exception as e:
+            # Últimos dígitos só: log de CI é público, chat_id identifica pessoa.
+            logger.error(f"[TELEGRAM] Falha ao enviar para ...{cid[-4:]}: {e}")
+    return entregues
+
+
 def send_alert(message: str) -> bool:
     """Send a Markdown message via Telegram. Returns True on success.
 
@@ -61,11 +84,10 @@ def send_alert(message: str) -> bool:
     if bot is None:
         return False
 
-    chat_ids = [cid.strip() for cid in chat_id.split(",") if cid.strip()]
+    entregues: list[str] = []
 
     async def _send_all():
-        for cid in chat_ids:
-            await bot.send_message(chat_id=cid, text=message, parse_mode="Markdown")
+        entregues.extend(await _entregar(bot, chat_id, message))
 
     try:
         asyncio.get_running_loop()
@@ -74,7 +96,7 @@ def send_alert(message: str) -> bool:
             future = pool.submit(asyncio.run, _send_all())
             try:
                 future.result(timeout=30)
-                return True
+                return bool(entregues)
             except Exception as e:
                 logger.error(f"[TELEGRAM] Falha (thread): {e}")
                 return False
@@ -82,7 +104,9 @@ def send_alert(message: str) -> bool:
         # Sem loop rodando — chama direto
         try:
             asyncio.run(_send_all())
-            return True
+            # False só quando NINGUÉM recebeu: entrega parcial ainda é entrega,
+            # e devolver False faria o chamador tratar como alerta perdido.
+            return bool(entregues)
         except TelegramError as e:
             logger.error(f"[TELEGRAM] Falha ao enviar: {e}")
             return False
@@ -109,7 +133,7 @@ class TelegramAlert:
     async def enviar_alerta_compra(self, ativo: str, rsi: float, veredito: str) -> None:
         if self._disabled:
             return
-        await self._bot.send_message(chat_id=self._chat_id, text=veredito, parse_mode="Markdown")
+        await _entregar(self._bot, self._chat_id, veredito)
 
     async def enviar_alerta_venda(self, ativo: str, motivo: str, preco_atual: float) -> None:
         if self._disabled:
@@ -120,7 +144,7 @@ class TelegramAlert:
             f"💰 Preço atual: R$ {preco_atual:.2f}\n\n"
             f"Revise sua posição no seu app de investimentos."
         )
-        await self._bot.send_message(chat_id=self._chat_id, text=msg, parse_mode="Markdown")
+        await _entregar(self._bot, self._chat_id, msg)
 
 
 # Exemplo de uso rápido para teste
