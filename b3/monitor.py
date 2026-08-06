@@ -15,19 +15,34 @@ from core.db import close_operation, get_open_operations, update_peak_price
 from core.macro_monitor import fetch_macro_snapshot
 
 
+TRAILING_STOP_PCT = 0.07   # queda do topo que dispara a venda
+
+
+def nivel_stop(pico: float) -> float:
+    """Preço em que o trailing dispara, dado o topo já atingido.
+
+    Fonte única para o monitor e para o painel. Enquanto cada um fazia a sua
+    conta, o painel mostrava `entrada * 0.93` congelado na compra e o monitor
+    vendia 7% abaixo do topo: numa posição com lucro, o número exibido não era
+    o número executado.
+    """
+    return pico * (1.0 - TRAILING_STOP_PCT)
+
+
 def check_trailing_stop(
     ticker: str,
     preco_compra: float,
     preco_atual: float,
     preco_maximo_atingido: float,
 ) -> tuple[bool, float]:
-    """Return (should_sell, new_peak). Triggers when price falls 7% from peak."""
+    """Return (should_sell, new_peak). Triggers at ``nivel_stop(peak)``."""
     if preco_atual > preco_maximo_atingido:
         preco_maximo_atingido = preco_atual
 
-    queda_do_topo = (1 - (preco_atual / preco_maximo_atingido)) * 100
-
-    if queda_do_topo >= 7.0:
+    # Compara contra o nível em vez da queda percentual. É a mesma conta em
+    # álgebra, mas `pico * 0.93` e `1 - atual/pico` divergem no último bit do
+    # float — e a divergência cai justamente no preço que o painel promete.
+    if preco_atual <= nivel_stop(preco_maximo_atingido):
         return True, preco_maximo_atingido   # VENDER
     return False, preco_maximo_atingido      # MANTER
 
@@ -78,7 +93,8 @@ def check_stops(messenger: TelegramAlert = None) -> list[dict]:
         op_id: int = op["id"]
         ticker: str = op["ticker"]
         entry: float = op["entry_price"]
-        stop: float = op["stop_price"]
+        # `stop_price` do banco não é lido: é o nível da compra, congelado. O
+        # nível vivo sai de `nivel_stop(peak)`.
         # Use DB-persisted peak; fall back to entry price on first check
         peak: float = op.get("peak_price") or entry
 
