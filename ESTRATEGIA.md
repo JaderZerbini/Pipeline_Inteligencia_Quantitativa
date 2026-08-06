@@ -1,6 +1,6 @@
 # Estratégia do pipeline B3 — estado, evidências e próximos passos
 
-Atualizado em **2026-08-04**.
+Atualizado em **2026-08-05**.
 
 Este arquivo existe para que nenhuma decisão de estratégia precise ser refeita
 por falta de memória. Cada escolha abaixo tem o número que a sustenta e o
@@ -17,17 +17,17 @@ flowchart TD
     C["momentum vence reversão<br/>em retorno, acerto e cauda"] --> D
     D["✅ Produção alinhada no momentum<br/>decision.py + scanner.py"] --> E
     E["✅ Backtester mede o que a produção roda<br/>entrada + saída + 10 anos"] --> F
-    F["✅ Gate de ticker com critério novo<br/>expectância no lugar de win_rate"] --> G
+    F["✅ Gate de ticker com critério novo<br/>expectância no lugar de win_rate"] --> H
+    H["✅ Decisão de saída<br/>trailing -7% mantido, agora medido"] --> G
     G{"Você está aqui"}
-    G --> H["⬜ Decisão de saída<br/>trailing vs stop fixo + alvo"]
-    H --> I["⬜ Crypto: mesma auditoria"]
+    G --> I["⬜ Crypto: mesma auditoria"]
     I --> J["⬜ Calibração do eixo impact<br/>release 3b"]
 
     style D fill:#1b5e20,color:#fff
     style E fill:#1b5e20,color:#fff
     style F fill:#1b5e20,color:#fff
+    style H fill:#1b5e20,color:#fff
     style G fill:#e65100,color:#fff
-    style H fill:#37474f,color:#fff
     style I fill:#37474f,color:#fff
     style J fill:#37474f,color:#fff
 ```
@@ -45,7 +45,12 @@ flowchart TD
 | compra FORTE | `b3/decision.py` | faixa **e** `vol > 1.5` **e** `score >= 70` |
 | compra MODERADO | `b3/decision.py` | faixa **e** `vol > 1.2` **e** `score >= 55` |
 | gate por ticker | `b3/decision.py` | só rebaixa MODERADO; FORTE passa direto |
-| saída | `b3/monitor.py` | trailing stop -7% do topo, **sem alvo** |
+| saída | `b3/monitor.py` | trailing stop -7% do topo, **sem alvo** (ver 3.3) |
+
+O nível vivo do stop sai de `nivel_stop(pico)` (`b3/monitor.py`), fonte única
+para o monitor e para o painel. Antes o painel mostrava `entrada * 0.93`
+gravado na compra: numa posição com lucro ele prometia um preço de saída que o
+robô não executava mais.
 
 **Os dois níveis compartilham a mesma faixa de RSI.** O que separa FORTE de
 MODERADO é volume e score, não RSI — então não existe rebaixamento de FORTE
@@ -83,7 +88,7 @@ Reproduz: `python scripts/compare_entry_rules.py --anos 10 --saida "trailing (pr
 | **Regime-switching por IBOV** | Momentum ganha em alta (44,1%) **e** em baixa (53,3%) | Critério pré-registrado: só construir se houvesse cruzamento. Não houve |
 | **Modelo de ML sobre análise gráfica** | Não implementado | Os dois filtros determinísticos mais óbvios (EMA, ADX) não acharam sinal. Com 466-740 exemplos e sem walk-forward, um modelo produziria backtest bonito e comportamento vivo desconhecido |
 
-### 3.3 Modelos de saída — **medido, decisão pendente**
+### 3.3 Modelos de saída — **decidido em 2026-08-05: fica o trailing de -7%**
 
 Mesmas entradas de momentum, só a saída varia:
 
@@ -91,12 +96,58 @@ Mesmas entradas de momentum, só a saída varia:
 |---|---|---|
 | stop fixo + alvo +15% (ordem real) | **+2,02%** | 2,2% |
 | trailing -7% do topo (**produção**) | +1,16% | **1,0%** |
+| trailing -7% **+ alvo +15%** | +0,86% | 1,1% |
 | conferência no fechamento (não implementável) | +2,81% | 7,2% |
 
-A saída da produção rende **0,86 p.p. a menos por operação** e tem **menos da
-metade** da frequência de cauda. Trade-off real, decisão pendente.
+**Acrescentar alvo ao trailing foi descartado.** A hipótese era que o +2,02% do
+stop fixo viesse do alvo realizando lucro. Não vem: com alvo, o mesmo balde de
+saídas por stop cai de **+1,2%** para **-2,4%** de retorno médio, porque os
+ganhadores grandes saem antes pelo alvo e sobram os medianos. O alvo não
+acrescenta realização de lucro — **trunca** a que o ratchet já fazia. Perde em
+retorno *e* em pior caso (-24,2% contra -20,5%), então não é trade-off.
 
-Reproduz: `python scripts/compare_entry_rules.py --anos 10 --estudo saida`
+O que separava as duas primeiras linhas não era o alvo: era a **largura** do
+stop. Varredura de 8 larguras, mesmas entradas, 10 anos:
+
+| trailing | retorno líq. 10a | DD máx | **Sharpe** | retorno/trade |
+|---|---|---|---|---|
+| -5% | 40% | -14,1% | 0,88 | +0,33% |
+| -6% | 92% | -15,4% | 1,12 | +0,74% |
+| **-7% (produção)** | 132% | **-14,6%** | **1,14** | +1,16% |
+| -8% | 123% | -18,3% | 1,00 | +1,42% |
+| -9% | 152% | -23,1% | 0,84 | +1,93% |
+| -10% | 191% | -18,8% | 0,91 | +2,63% |
+| -12% | 299% | -23,9% | 0,82 | +4,45% |
+| -15% | 397% | -25,0% | 0,85 | +7,22% |
+
+O -7% entrou no commit `e3b9f35` — o mesmo que criou o `monitor.py` — e nunca
+foi tocado nem medido até aqui. Medido, **está no pico da curva de Sharpe**. O
+-6% empata dentro do ruído; de -8% em diante cai e não volta.
+
+Três leituras que a tabela esconde:
+
+- **Retorno/trade não serve para escolher largura.** Stop mais largo dispara
+  menos, então cada operação dura mais e rende mais *por operação* — por
+  construção, não por vantagem. Por isso a coluna de carteira equal-weight
+  existe: mesmo denominador de 10 anos para todas as larguras.
+- **O bruto sobe até -15% porque trailing largo vira buy-and-hold.** Os 397%
+  são majoritariamente a deriva de um mercado que subiu em 2015-2025. É aposta
+  em regime, não vantagem medida — e o Sharpe cobra o preço.
+- **A frequência de perda além de -10% vira artefato acima dessa largura.** Com
+  trailing de -12%, toda saída normal por stop perde 12% e entra na conta; daí
+  o salto de 1,8% para 17%. O número comparável entre larguras é o `pior`, que
+  fica em **-20,5% em todas** — pior caso é gap, e nenhuma largura muda gap.
+
+**Estabilidade:** partindo os 10 anos ao meio (corte em 2021-08), toda largura
+rende menos na segunda metade (-7%: +1,46% contra +0,81% por trade). A *ordem*
+entre as larguras se mantém nas duas metades; o *nível* não. Mais uma razão
+para não perseguir o topo de uma varredura.
+
+Reproduz:
+```
+python scripts/compare_entry_rules.py --anos 10 --estudo saida
+python scripts/compare_entry_rules.py --anos 10 --estudo varredura
+```
 
 ### 3.4 Classificação de tickers
 
@@ -156,13 +207,7 @@ envelhece — o campo `generated_at` diz de quando é.
 
 ## 5. Próximos passos
 
-### 5.1 Decisão de saída (próximo)
-Escolher entre o trailing atual e stop fixo + alvo. Os números estão em 3.3.
-É trade-off entre 0,86 p.p. de retorno por operação e o dobro de frequência de
-cauda — decisão de estratégia, não técnica. Envolve mexer em `b3/monitor.py`,
-que hoje não tem take profit em lugar nenhum.
-
-### 5.2 Auditoria do crypto
+### 5.1 Auditoria do crypto (próximo)
 `crypto/` não foi tocado. Sabemos que:
 - **O bug das faixas não existe lá.** `crypto/scanner.py` não filtra por RSI —
   emite tudo e deixa `crypto/decision.py` filtrar (RSI <= 32 forte / <= 40
@@ -172,6 +217,21 @@ que hoje não tem take profit em lugar nenhum.
   que achamos no B3. Apareceu nos outros dois lugares; vale checar.
 - Dado de backtest: klines da Binance, grátis, endpoint público, histórico
   desde ~2017. `crypto/scanner.py:98` já usa essa API.
+
+### 5.2 Reavaliar posição aberta com informação (ideia guardada)
+Hoje a IA opina **só na compra**. Depois que a posição abre, `b3/monitor.py` lê
+exclusivamente preço do yfinance: não relê notícia, não reconsulta a IA, não
+reavalia a tese. O único elemento não-preço é o alerta macro, que manda
+Telegram e **não vende nada**.
+
+A ideia é deixar a IA segurar uma posição que o trailing venderia, quando a
+notícia indica continuação da alta. Alargar o stop é a versão *cega* disso — e
+3.3 mostra que ela custa Sharpe. A versão com informação não é mensurável hoje:
+não existe histórico de decisões da IA para simular contra o preço que veio
+depois. O caminho honesto é o mesmo do `impact` — **coletar primeiro**, gravando
+a opinião da IA sobre posições abertas sem deixá-la decidir nada, e só calibrar
+quando houver amostra. Ligar isso com threshold chutado é overfitting com
+dinheiro real.
 
 ### 5.3 Pendências herdadas
 - **FORTE vs MODERADO sem validação.** FORTE aloca o dobro (20% vs 10%) com
